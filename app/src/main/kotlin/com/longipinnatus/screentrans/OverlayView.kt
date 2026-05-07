@@ -19,8 +19,8 @@ class OverlayView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0,
-    private var mergedBlocks: List<TextBlock> = emptyList(),
-    private var rawBlocks: List<TextBlock> = emptyList(),
+    private var textBlocks: List<TextBlock> = emptyList(),
+    private var textElements: List<TextElement> = emptyList(),
     private val settings: AppSettings.SettingsData = AppSettings.SettingsData(),
 ) : View(context, attrs, defStyleAttr) {
 
@@ -32,17 +32,15 @@ class OverlayView @JvmOverloads constructor(
     private val textPaint = TextPaint().apply {
         color = Color.WHITE
         isAntiAlias = true
-        
-        val baseTypeface = if (settings.overlayFontPath.isNotEmpty()) {
+
+        val baseTypeface = settings.overlayFontPath.takeIf { it.isNotEmpty() }?.let { path ->
             try {
-                Typeface.createFromFile(settings.overlayFontPath)
+                Typeface.createFromFile(path)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load custom font from ${settings.overlayFontPath}", e)
-                Typeface.DEFAULT
+                Log.e(TAG, "Failed to load custom font from $path", e)
+                null
             }
-        } else {
-            Typeface.DEFAULT
-        }
+        } ?: Typeface.DEFAULT
         
         val style = when {
             settings.overlayFontBold && settings.overlayFontItalic -> Typeface.BOLD_ITALIC
@@ -71,9 +69,8 @@ class OverlayView @JvmOverloads constructor(
         strokeWidth = 2f
     }
 
-    fun updateData(newMergedBlocks: List<TextBlock>, newRawBlocks: List<TextBlock>) {
-        this.mergedBlocks = newMergedBlocks.toList()
-        this.rawBlocks = newRawBlocks.toList()
+    fun updateData(newTextBlocks: List<TextBlock>) {
+        this.textBlocks = newTextBlocks.toList()
         invalidate()
     }
 
@@ -103,11 +100,11 @@ class OverlayView @JvmOverloads constructor(
         val screenWidth = resources.displayMetrics.widthPixels
         val screenHeight = resources.displayMetrics.heightPixels
 
-        if (mergedBlocks.isEmpty()) {
+        if (textBlocks.isEmpty()) {
             Log.d(TAG, "onDraw: mergedBlocks is empty")
         }
 
-        mergedBlocks.forEach { block ->
+        textBlocks.forEach { block ->
             val text = block.translatedText
             if (text == null) {
                 Log.d(TAG, "onDraw: block text is null, bounds=${block.bounds}")
@@ -130,7 +127,6 @@ class OverlayView @JvmOverloads constructor(
                 drawHorizontalBlock(canvas, block, text, localLeft, localTop)
             }
 
-            // Draw detection boxes in debug mode
             if (settings.showBoxes) {
                 debugRect.set(
                     bounds.left.toFloat() - locationOnScreen[0],
@@ -142,15 +138,13 @@ class OverlayView @JvmOverloads constructor(
             }
         }
 
-        // Draw unmerged detection boxes in debug mode
         if (settings.showRawBoxes) {
-            rawBlocks.forEach { block ->
-
+            textElements.forEach { element ->
                 debugRect.set(
-                    block.bounds.left.toFloat() - locationOnScreen[0],
-                    block.bounds.top.toFloat() - locationOnScreen[1],
-                    block.bounds.right.toFloat() - locationOnScreen[0],
-                    block.bounds.bottom.toFloat() - locationOnScreen[1]
+                    element.bounds.left.toFloat() - locationOnScreen[0],
+                    element.bounds.top.toFloat() - locationOnScreen[1],
+                    element.bounds.right.toFloat() - locationOnScreen[0],
+                    element.bounds.bottom.toFloat() - locationOnScreen[1]
                 )
                 canvas.drawRect(debugRect, rawBoxPaint)
             }
@@ -320,7 +314,6 @@ class OverlayView @JvmOverloads constructor(
             .build()
     }
 
-
     private fun calculateDelay(): Long {
         if (settings.autoHideMode == AppSettings.AUTO_HIDE_MODE_FIXED) {
             return settings.displayDurationSec * 1000L
@@ -336,7 +329,7 @@ class OverlayView @JvmOverloads constructor(
             streamingDeadline
         } else {
             // Non-streaming (one-shot display) or OCR-only mode: calculate deadline based on total text length
-            val totalLength = mergedBlocks.sumOf { it.translatedText?.length ?: 0 }
+            val totalLength = textBlocks.sumOf { it.translatedText?.length ?: 0 }
             currentTime + (totalLength * settings.durationPerWordMs)
         }
 

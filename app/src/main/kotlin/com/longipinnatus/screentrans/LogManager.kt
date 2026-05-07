@@ -146,8 +146,8 @@ object LogManager {
         }
     }
 
-    fun logException(tag: String, e: Throwable, context: String = "") {
-        val message = if (context.isNotEmpty()) "$context: ${e.message}" else "${e.message}"
+    fun logException(tag: String, msg: String = "", e: Throwable) {
+        val message = if (msg.isNotEmpty()) "$msg: ${e.message}" else "${e.message}"
         log(LogType.ERROR, tag, listOf(
             LogEntry("Exception", e.javaClass.simpleName),
             LogEntry("Message", message),

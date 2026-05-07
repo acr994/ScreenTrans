@@ -156,7 +156,7 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
                         setupMediaProjection(resultCode, resultData)
                         showFloatingBall()
                     } catch (e: Exception) {
-                        LogManager.logException(TAG, e, "Setup failed")
+                        LogManager.logException(TAG, "Setup failed", e)
                         stopSelf()
                     }
                 } else {
@@ -181,7 +181,7 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
             virtualDisplayCreated = false
             LogManager.logSimple(LogType.DEBUG, TAG, "MediaProjection initialized")
         } catch (e: Exception) {
-            LogManager.logException(TAG, e, "Failed to get MediaProjection")
+            LogManager.logException(TAG, "Failed to get MediaProjection", e)
             return
         }
         mediaProjection?.registerCallback(
@@ -251,6 +251,21 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
         floatingView?.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
+    private fun launchRegionSelection(isFullWidth: Boolean) {
+        if (isProcessing.get()) return
+        setBallVisibility(false)
+        RegionSelectionView(
+            this@FloatingService,
+            isFullWidthMode = isFullWidth,
+            onRegionSelected = { rect ->
+                captureAndTranslate(rect)
+            },
+            onCancel = {
+                setBallVisibility(true)
+            }
+        ).show()
+    }
+
     private fun showFloatingBall() {
         if (floatingView != null) return
 
@@ -277,39 +292,16 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
                             windowManager.updateViewLayout(this@apply, params)
                         },
                         onClick = {
-                            if (!isProcessing.get()) {
-                                if (currentSettings.regionMode) {
-                                    setBallVisibility(false)
-                                    RegionSelectionView(
-                                        this@FloatingService,
-                                        isFullWidthMode = false,
-                                        onRegionSelected = { rect ->
-                                            captureAndTranslate(rect)
-                                        },
-                                        onCancel = {
-                                            setBallVisibility(true)
-                                        }
-                                    ).show()
-                                } else {
-                                    captureAndTranslate()
-                                }
+                            if (currentSettings.regionMode) {
+                                launchRegionSelection(false)
+                            } else if (!isProcessing.get()) {
+                                captureAndTranslate()
                             }
                         },
-                    ) {
-                        if (!isProcessing.get()) {
-                            setBallVisibility(false)
-                            RegionSelectionView(
-                                this@FloatingService,
-                                isFullWidthMode = true,
-                                onRegionSelected = { rect ->
-                                    captureAndTranslate(rect)
-                                },
-                                onCancel = {
-                                    setBallVisibility(true)
-                                }
-                            ).show()
+                        onDoubleClick = {
+                            launchRegionSelection(true)
                         }
-                    }
+                    )
                 }
             }
         }
@@ -409,7 +401,7 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
                             LogManager.logSimple(LogType.DEBUG, TAG, "Starting ProjectionProxyActivity via PendingIntent (Dual BAL opt-in)")
                             pendingIntent.send(this@FloatingService, 0, null, null, null, null, senderOptions.toBundle())
                         } catch (e: Exception) {
-                            LogManager.logException(TAG, e, "Failed to launch via PendingIntent, falling back to startActivity")
+                            LogManager.logException(TAG, "Failed to launch via PendingIntent, falling back to startActivity", e)
                             startActivity(intent)
                         }
                     }
@@ -437,33 +429,33 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
                         }
                     }
 
-                    val ocrResult = OcrPostProcessor.processRawBlocks(OcrEngine.detect(bitmap, currentSettings), currentSettings)
+                    val textElements = OcrEngine.process(bitmap, currentSettings)
+                    val textBlocks = OcrPostProcessor.process(textElements, currentSettings) // deep copied
 
                     if (region != null) {
                         Log.d(TAG, "captureAndTranslate: Applying region offset: ${region.left}, ${region.top}")
-                        ocrResult.mergedBlocks.forEach { it.bounds.offset(region.left, region.top) }
-                        ocrResult.rawBlocks.forEach { it.bounds.offset(region.left, region.top) }
+                        textBlocks.forEach { it.offset(region.left, region.top) }
+                        textElements.forEach { it.offset(region.left, region.top) }
                     }
 
-                    if (ocrResult.mergedBlocks.isNotEmpty()) {
+                    if (textBlocks.isNotEmpty()) {
                         withContext(Dispatchers.Main) {
-                            // Ensure translatedText is not null before showing (placeholder)
-                            ocrResult.mergedBlocks.forEach { if (it.translatedText == null) it.translatedText = it.text }
-                            OverlayManager.show(this@FloatingService, ocrResult, currentSettings)
+                            textBlocks.forEach { if (it.translatedText == null) it.translatedText = it.text }
+                            OverlayManager.show(this@FloatingService, textBlocks, textElements, currentSettings)
                         }
 
                         if (!currentSettings.ocrOnly) {
                             // Update progress (handles streaming and non-streaming translation via onUpdate)
-                            TranslationEngine.translate(ocrResult.mergedBlocks, currentSettings) { streamingIncrementalLen ->
+                            TranslationEngine.translate(textBlocks, currentSettings) { streamingIncrementalLen ->
                                 serviceScope.launch(Dispatchers.Main) {
-                                    OverlayManager.update(ocrResult, currentSettings, streamingIncrementalLen)
+                                    OverlayManager.update(textBlocks, currentSettings, streamingIncrementalLen)
                                 }
                             }
                         }
                         
                         // Final update with clipboard and auto-hide trigger
                         withContext(Dispatchers.Main) {
-                            OverlayManager.finish(this@FloatingService, ocrResult, currentSettings)
+                            OverlayManager.finish(this@FloatingService, textBlocks, currentSettings)
                         }
                     } else {
                         Log.d(TAG, "No text to show")
@@ -471,7 +463,7 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
                     bitmap.recycle()
                 }
             } catch (e: Exception) {
-                LogManager.logException(TAG, e, "Error in captureAndTranslate")
+                LogManager.logException(TAG, "Error in captureAndTranslate", e)
                 withContext(Dispatchers.Main) {
                     setBallVisibility(true)
                 }

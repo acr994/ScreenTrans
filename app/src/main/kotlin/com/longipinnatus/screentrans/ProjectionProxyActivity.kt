@@ -83,7 +83,7 @@ class ProjectionProxyActivity : ComponentActivity() {
                 LogManager.logSimple(LogType.DEBUG, TAG, "Launching screenCaptureLauncher")
                 screenCaptureLauncher.launch(captureIntent)
             } catch (e: Exception) {
-                LogManager.logException(TAG, e, "Failed to launch screen capture intent")
+                LogManager.logException(TAG, "Failed to launch screen capture intent", e)
                 finish()
             }
         }

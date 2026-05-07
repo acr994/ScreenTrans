@@ -22,6 +22,7 @@ object TranslationEngine {
     private var currentCall: Call? = null
     private val THINKING_TAGS_REGEX = Regex("<(think|thought|reasoning)>.*?</\\1>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val MARKDOWN_CODE_BLOCK_REGEX = Regex("^```(?:json)?|```$")
+    private val JSON_ITEM_PATTERN = """\{\s*"id"\s*:\s*"?(\d+)"?\s*,\s*"text"\s*:\s*"(.*?)"(?=\s*[},])""".toRegex(RegexOption.DOT_MATCHES_ALL)
 
     fun cancel() {
         currentCall?.cancel()
@@ -253,14 +254,9 @@ object TranslationEngine {
         val cleanContent = content.replace(THINKING_TAGS_REGEX, "")
         
         // Robust regex for {"id": 0, "text": "..."} or {"id": "0", "text": "..."}
-        val pattern = """\{\s*"id"\s*:\s*"?(\d+)"?\s*,\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}""".toRegex()
-        pattern.findAll(cleanContent).forEach { match ->
+        JSON_ITEM_PATTERN.findAll(cleanContent).forEach { match ->
             val id = match.groupValues[1].toIntOrNull()
-            val text = match.groupValues[2]
-                .replace("\\\"", "\"")
-                .replace("\\n", "\n")
-                .replace("\\r", "\r")
-                .replace("\\\\", "\\")
+            val text = unescapeJsonString(match.groupValues[2])
             
             if (id != null && id !in seenIds) {
                 seenIds.add(id)
@@ -310,22 +306,52 @@ object TranslationEngine {
             }
         }
         
-        return try {
+        // Strategy 1: Standard List parsing
+        try {
             val listType = object : TypeToken<List<Any>>() {}.type
             val rawList: List<Any> = gson.fromJson(cleanContent, listType)
-            extractTexts(rawList)
+            return extractTexts(rawList)
         } catch (e: Exception) {
-            try {
-                Log.w(TAG, "Failed to parse JSON response, trying to mitigate: $cleanContent", e)
-                val mapType = object : TypeToken<Map<String, Any>>() {}.type
-                val map: Map<String, Any> = gson.fromJson(cleanContent, mapType)
-                val list = map.values.find { it is List<*> } as? List<*>
-                list?.let { extractTexts(it) }
-            } catch (e2: Exception) {
-                Log.e(TAG, "Failed to parse JSON response: $cleanContent", e2)
-                null
+            Log.w(TAG, "Standard JSON list parsing failed, trying map fallback: ${e.message}")
+        }
+
+        // Strategy 2: Map fallback (in case LLM wraps the list in an object)
+        try {
+            val mapType = object : TypeToken<Map<String, Any>>() {}.type
+            val map: Map<String, Any> = gson.fromJson(cleanContent, mapType)
+            val list = map.values.find { it is List<*> } as? List<*>
+            if (list != null) return extractTexts(list)
+        } catch (e: Exception) {
+            Log.w(TAG, "Map fallback parsing failed, trying regex fallback: ${e.message}")
+        }
+
+        // Strategy 3: Regex fallback (for broken JSON with unescaped quotes)
+        return tryRegexParse(cleanContent).also {
+            if (it == null) {
+                Log.e(TAG, "All JSON parsing strategies failed for: $cleanContent")
             }
         }
+    }
+
+    private fun tryRegexParse(content: String): List<String>? {
+        val results = mutableMapOf<Int, String>()
+        JSON_ITEM_PATTERN.findAll(content).forEach { match ->
+            val id = match.groupValues[1].toIntOrNull()
+            val text = unescapeJsonString(match.groupValues[2])
+            if (id != null) results[id] = text
+        }
+        
+        if (results.isEmpty()) return null
+        
+        val maxId = results.keys.maxOrNull() ?: return null
+        return (0..maxId).map { results[it] ?: "" }
+    }
+
+    private fun unescapeJsonString(s: String): String {
+        return s.replace("\\\"", "\"")
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\\\", "\\")
     }
 
     private fun extractTexts(items: List<*>): List<String> {

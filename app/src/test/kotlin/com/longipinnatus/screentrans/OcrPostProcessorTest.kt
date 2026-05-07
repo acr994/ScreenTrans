@@ -63,18 +63,37 @@ class OcrPostProcessorTest {
         runTest(raw, "ocr_complex.svg")
     }
 
-    private fun runTest(raw: List<TextBlock>, fileName: String) {
-        val result = OcrPostProcessor.processRawBlocks(raw, AppSettings.SettingsData())
-        generateSvg(raw, result.mergedBlocks, fileName)
+    @Test
+    fun testHierarchicalStructure() {
+        val raw = listOf(
+            createBlock("Line 1", 50, 200, 300, 240),
+            createBlock("Line 2", 50, 250, 300, 290)
+        )
+        val blocks = OcrPostProcessor.process(raw, AppSettings.SettingsData())
+        
+        assert(blocks.size == 1)
+        val block = blocks[0]
+        assert(block.lines.size == 2)
+        assert(block.lines[0].text == "Line 1")
+        assert(block.lines[1].text == "Line 2")
+        assert(block.lines[0].elements.size == 1)
+        assert(block.lines[0].elements[0].text == "Line 1")
+        
+        runTest(raw, "ocr_hierarchical.svg")
+    }
+
+    private fun runTest(raw: List<TextElement>, fileName: String) {
+        val blocks = OcrPostProcessor.process(raw, AppSettings.SettingsData())
+        generateSvg(raw, blocks, fileName)
         println("Generated: ${File(fileName).absolutePath}")
     }
 
-    private fun createBlock(text: String, l: Int, t: Int, r: Int, b: Int, isVertical: Boolean = false): TextBlock {
+    private fun createBlock(text: String, l: Int, t: Int, r: Int, b: Int, isVertical: Boolean = false): TextElement {
         val rect = Rect(l, t, r, b)
-        return TextBlock(text, rect, rect, rect, isVertical = isVertical)
+        return TextElement(text, rect, isVertical = isVertical)
     }
 
-    private fun generateSvg(raw: List<TextBlock>, merged: List<TextBlock>, fileName: String) {
+    private fun generateSvg(raw: List<TextElement>, merged: List<TextBlock>, fileName: String) {
         val sb = StringBuilder()
         val width = 1000
         val height = 800

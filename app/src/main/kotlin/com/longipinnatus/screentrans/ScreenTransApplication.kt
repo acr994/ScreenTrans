@@ -34,7 +34,7 @@ class ScreenTransApplication : Application() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
-                LogManager.logException(TAG, throwable, "FATAL EXCEPTION in thread ${thread.name}")
+                LogManager.logException(TAG, "FATAL EXCEPTION in thread ${thread.name}", throwable)
                 Log.e(TAG, "FATAL EXCEPTION in thread ${thread.name}", throwable)
             } catch (_: Exception) {
                 // Fallback if logging fails

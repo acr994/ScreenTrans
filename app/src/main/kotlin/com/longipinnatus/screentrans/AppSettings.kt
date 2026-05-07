@@ -106,7 +106,17 @@ object AppSettings {
         val regex: String = "",
         val applyToRaw: Boolean = true,
         val applyToMerged: Boolean = true
-    )
+    ) {
+        val pattern: Regex?
+            get() = if (regex.isNotEmpty()) {
+                try {
+                    Regex(regex, RegexOption.IGNORE_CASE)
+                } catch (e: Exception) {
+                    LogManager.logException("FilterRule", "Invalid regex pattern: $regex", e)
+                    null
+                }
+            } else null
+    }
 
     @Keep
     data class SettingsData(

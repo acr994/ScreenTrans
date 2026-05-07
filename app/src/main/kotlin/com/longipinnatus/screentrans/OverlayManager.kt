@@ -23,17 +23,17 @@ object OverlayManager {
         UNKNOWN
     }
 
-    fun show(context: Context, result: OcrResult, settings: AppSettings.SettingsData) {
+    fun show(context: Context, blocks: List<TextBlock>, elements: List<TextElement>, settings: AppSettings.SettingsData) {
         val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         
-        Log.d(TAG, "show: mergedBlocks size=${result.mergedBlocks.size}")
+        Log.d(TAG, "show: mergedBlocks size=${blocks.size}")
 
         dismiss(DismissReason.NEW_OVERLAY)
 
         val overlay = OverlayView(
             context = context,
-            mergedBlocks = result.mergedBlocks,
-            rawBlocks = result.rawBlocks,
+            textBlocks = blocks,
+            textElements = elements,
             settings = settings,
         )
         
@@ -62,15 +62,15 @@ object OverlayManager {
         try {
             windowManager.addView(overlay, params)
             currentOverlay = overlay
-            LogManager.logSimple(LogType.DEBUG, TAG, "Overlay shown (blocks=${result.mergedBlocks.size})")
+            LogManager.logSimple(LogType.DEBUG, TAG, "Overlay shown (blocks=${blocks.size})")
         } catch (e: Exception) {
-            LogManager.logException(TAG, e, "Failed to add overlay view")
+            LogManager.logException(TAG, "Failed to add overlay view", e)
         }
     }
 
-    fun update(result: OcrResult, settings: AppSettings.SettingsData, streamingIncrementalLen: Int) {
+    fun update(blocks: List<TextBlock>, settings: AppSettings.SettingsData, streamingIncrementalLen: Int) {
         currentOverlay?.let { overlay ->
-            overlay.updateData(result.mergedBlocks, result.rawBlocks)
+            overlay.updateData(blocks)
 
             if (settings.autoHide && (settings.autoHideMode == AppSettings.AUTO_HIDE_MODE_DYNAMIC) && (streamingIncrementalLen > 0)) {
                 overlay.updateStreamingDeadline(streamingIncrementalLen)
@@ -78,14 +78,14 @@ object OverlayManager {
         }
     }
 
-    fun finish(context: Context, result: OcrResult, settings: AppSettings.SettingsData) {
+    fun finish(context: Context, blocks: List<TextBlock>, settings: AppSettings.SettingsData) {
         currentOverlay?.let { overlay ->
             if (settings.autoHide) {
                 overlay.startAutoHideTimer()
             }
 
             if (settings.autoCopyToClipboard) {
-                copyToClipboard(context, result.mergedBlocks, settings)
+                copyToClipboard(context, blocks, settings)
             }
         }
     }
@@ -135,7 +135,7 @@ object OverlayManager {
             clipboard.setPrimaryClip(clip)
             LogManager.logSimple(LogType.DEBUG, TAG, "Copied to clipboard: ${textToCopy.take(20).replace("\n", " ")}...")
         } catch (e: Exception) {
-            LogManager.logException(TAG, e, "Clipboard copy failed")
+            LogManager.logException(TAG, "Clipboard copy failed", e)
         }
     }
 

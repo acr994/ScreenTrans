@@ -9,7 +9,6 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Rect
 import android.util.Log
-import androidx.annotation.Keep
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
 import java.nio.FloatBuffer
@@ -22,45 +21,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-@Keep
-data class TextBlock(
-    /** The recognized text from the OCR process. */
-    val text: String,
-    /** The overall bounding rectangle of the text block. */
-    val bounds: Rect,
-    /** The bounding rectangle of the first line in this block. */
-    val firstLineBounds: Rect,
-    /** The bounding rectangle of the last line in this block. */
-    val lastLineBounds: Rect,
-    /** The translated text, if translation has been performed. */
-    var translatedText: String? = null,
-    /** Indicates whether the text is oriented vertically. */
-    val isVertical: Boolean = false,
-    /** Estimated foreground (text) color. */
-    var textColor: Int? = null,
-    /** Estimated background color. */
-    var backgroundColor: Int? = null,
-    /** Weight of the color (usually based on text length) to help dominant color selection during merging. */
-    var colorWeight: Int = 0,
-    /** Number of physical lines this block contains. */
-    var lineCount: Int = 1,
-) {
-    fun copy(): TextBlock {
-        return TextBlock(
-            text = text,
-            bounds = Rect(bounds),
-            firstLineBounds = Rect(firstLineBounds),
-            lastLineBounds = Rect(lastLineBounds),
-            translatedText = translatedText,
-            isVertical = isVertical,
-            textColor = textColor,
-            backgroundColor = backgroundColor,
-            colorWeight = colorWeight,
-            lineCount = lineCount
-        )
-    }
-}
-
 object OcrEngine {
     private val TAG = OcrEngine::class.java.simpleName
     private var ortEnv: OrtEnvironment? = null
@@ -68,82 +28,60 @@ object OcrEngine {
     private var recSession: OrtSession? = null
     private var currentDetModel: String? = null
     private var currentRecModel: String? = null
+    private var currentDetPath: String? = null
+    private var currentRecPath: String? = null
     private var alphabet: List<String> = emptyList()
 
+    private data class PreprocessedData(
+        val buffer: FloatBuffer,
+        val width: Int,
+        val height: Int,
+        val scaleX: Float,
+        val scaleY: Float
+    )
+
     fun init(context: Context, settings: AppSettings.SettingsData) {
-        if ((ortEnv != null) && 
-            (currentDetModel == settings.detModelType) && 
-            (currentRecModel == settings.recModelType)) {
+        val detPath = resolveModelPath(context, settings.detModelType, settings.detCustomModelPath, "det_mobile.onnx")
+        val recPath = resolveModelPath(context, settings.recModelType, settings.recCustomModelPath, "rec_mobile.onnx")
+
+        if (ortEnv != null && detPath == currentDetPath && recPath == currentRecPath) {
             return
         }
-        
+
         try {
-            if (ortEnv == null) {
-                ortEnv = OrtEnvironment.getEnvironment()
-            }
-            
+            Log.i(TAG, "Initializing OcrEngine...")
+            ortEnv = ortEnv ?: OrtEnvironment.getEnvironment()
+
             // Release existing sessions if we are re-initializing
             detSession?.close()
             recSession?.close()
 
-            Log.i(TAG, "Initializing OcrEngine...")
-            
-            var detModelPath = if (settings.detModelType == AppSettings.MODEL_TYPE_CUSTOM && settings.detCustomModelPath.isNotEmpty()) {
-                settings.detCustomModelPath
-            } else {
-                getModelPath(context, if (settings.detModelType == AppSettings.MODEL_TYPE_CUSTOM) "det_custom.onnx" else "det_mobile.onnx")
-            }
-
-            // Fallback if custom model is missing
-            if (settings.detModelType == AppSettings.MODEL_TYPE_CUSTOM && (detModelPath.isEmpty() || !java.io.File(detModelPath).exists())) {
-                Log.w(TAG, "Custom detection model not found, falling back to mobile")
-                detModelPath = getModelPath(context, "det_mobile.onnx")
-            }
-
-            var recModelPath = if (settings.recModelType == AppSettings.MODEL_TYPE_CUSTOM && settings.recCustomModelPath.isNotEmpty()) {
-                settings.recCustomModelPath
-            } else {
-                getModelPath(context, if (settings.recModelType == AppSettings.MODEL_TYPE_CUSTOM) "rec_custom.onnx" else "rec_mobile.onnx")
-            }
-
-            if (settings.recModelType == AppSettings.MODEL_TYPE_CUSTOM && (recModelPath.isEmpty() || !java.io.File(recModelPath).exists())) {
-                Log.w(TAG, "Custom recognition model not found, falling back to mobile")
-                recModelPath = getModelPath(context, "rec_mobile.onnx")
-            }
-
-            if (detModelPath.isEmpty() || recModelPath.isEmpty()) {
-                Log.e(TAG, "Required models not found. Det: $detModelPath, Rec: $recModelPath")
+            if (detPath.isEmpty() || recPath.isEmpty()) {
+                Log.e(TAG, "Required models missing. Det: $detPath, Rec: $recPath")
                 return
             }
 
-            Log.i(TAG, "Detection model path: $detModelPath")
-            Log.i(TAG, "Recognition model path: $recModelPath")
-
             val sessionOptions = OrtSession.SessionOptions()
-            Log.i(TAG, "Using CPU for inference.")
-            
-            detSession = ortEnv?.createSession(detModelPath, sessionOptions)
-            recSession = ortEnv?.createSession(recModelPath, sessionOptions)
-            
+            detSession = ortEnv?.createSession(detPath, sessionOptions)
+            recSession = ortEnv?.createSession(recPath, sessionOptions)
+
             currentDetModel = settings.detModelType
             currentRecModel = settings.recModelType
+            currentDetPath = detPath
+            currentRecPath = recPath
 
             LogManager.log(LogType.INFO, TAG, listOf(
                 LogEntry("Status", "OcrEngine initialized"),
-                LogEntry("DetModel", detModelPath.substringAfterLast("/")),
-                LogEntry("RecModel", recModelPath.substringAfterLast("/"))
+                LogEntry("DetModel", detPath.substringAfterLast("/")),
+                LogEntry("RecModel", recPath.substringAfterLast("/"))
             ))
 
-            alphabet = context.assets.open("dict.txt").bufferedReader().useLines { lines ->
-                val list = mutableListOf<String>()
-                list.add("blank")
-                lines.forEach { list.add(it) }
-                list.add(" ")
-                list
+            if (alphabet.isEmpty()) {
+                alphabet = listOf("blank") + context.assets.open("dict.txt").bufferedReader().readLines() + " "
             }
             Log.d(TAG, "OcrEngine initialized.")
         } catch (e: Exception) {
-            LogManager.logException(TAG, e, "Initialization failed")
+            LogManager.logException(TAG, "Initialization failed", e)
         }
     }
 
@@ -160,36 +98,63 @@ object OcrEngine {
         }
     }
 
-    fun detect(bitmap: Bitmap, settings: AppSettings.SettingsData): List<TextBlock> {
-        val env = ortEnv ?: run {
-            LogManager.logSimple(LogType.ERROR, TAG, "detect: ortEnv is null")
-            return emptyList()
-        }
-        val det = detSession ?: run {
-            LogManager.logSimple(LogType.ERROR, TAG, "detect: detSession is null")
-            return emptyList()
-        }
+    fun process(bitmap: Bitmap, settings: AppSettings.SettingsData): List<TextElement> {
+        val preprocessed = preprocess(bitmap) ?: return emptyList()
+        val boxes = detect(preprocessed, settings)
         
-        Log.d(TAG, "detect: input bitmap size=${bitmap.width}x${bitmap.height}")
-        
-        // 1. Matches DetResizeForTest: resize_long: 960 in YAML
+        val results = mutableListOf<TextElement>()
+        for (box in boxes) {
+            val isVert = when (settings.textOrientation) {
+                AppSettings.TEXT_ORIENTATION_VERTICAL -> true
+                AppSettings.TEXT_ORIENTATION_HORIZONTAL -> false
+                else -> box.height() > box.width() * 1.5
+            }
+            
+            val cropped = cropAndRescale(bitmap, box)
+            val colors = extractColors(cropped)
+            val finalInput = if (isVert) {
+                val rotated = rotateBitmap(cropped)
+                if (rotated !== cropped && cropped !== bitmap) cropped.recycle()
+                rotated
+            } else {
+                cropped
+            }
+
+            val text = recognize(finalInput).trim()
+            if (finalInput !== bitmap) finalInput.recycle()
+
+            if (text.isNotEmpty()) {
+                results.add(
+                    TextElement(
+                        text = text,
+                        bounds = box,
+                        isVertical = isVert,
+                        textColor = colors.first,
+                        backgroundColor = colors.second,
+                        colorWeight = text.length
+                    )
+                )
+            }
+        }
+        return results
+    }
+
+    private fun preprocess(bitmap: Bitmap): PreprocessedData? {
         val ratio = 960f / max(bitmap.width, bitmap.height).coerceAtLeast(1)
         val detWidth = max(32, ((bitmap.width * ratio / 32.0).roundToInt() * 32))
         val detHeight = max(32, ((bitmap.height * ratio / 32.0).roundToInt() * 32))
-        
-        Log.d(TAG, "detect: detSize=${detWidth}x${detHeight}, ratio=$ratio")
 
-        if (detWidth <= 0 || detHeight <= 0) return emptyList()
+        Log.d(TAG, "preprocess: image size=${detWidth}x${detHeight}, ratio=$ratio")
+
+        if (detWidth <= 0 || detHeight <= 0) return null
 
         val scaledBitmap = bitmap.scale(detWidth, detHeight)
-        val rawBlocks = mutableListOf<TextBlock>()
-
         try {
             val imgData = FloatBuffer.allocate(1 * 3 * detHeight * detWidth)
             val pixels = IntArray(detWidth * detHeight)
             scaledBitmap.getPixels(pixels, 0, detWidth, 0, 0, detWidth, detHeight)
 
-            // 2. Matches img_mode: BGR and NormalizeImage in YAML
+            // Matches img_mode: BGR and NormalizeImage in YAML
             // PaddleOCR applies mean/std to B, G, R sequentially in BGR mode
             val means = floatArrayOf(0.485f, 0.456f, 0.406f)
             val stds = floatArrayOf(0.229f, 0.224f, 0.225f)
@@ -198,18 +163,37 @@ object OcrEngine {
                     for (j in 0 until detWidth) {
                         val pix = pixels[i * detWidth + j]
                         val v = when (c) {
-                            0 -> pix and 0xFF              // Blue
-                            1 -> (pix shr 8) and 0xFF      // Green
-                            else -> (pix shr 16) and 0xFF // Red
+                            0 -> pix and 0xFF               // Blue
+                            1 -> (pix shr 8) and 0xFF       // Green
+                            else -> (pix shr 16) and 0xFF   // Red
                         }
                         imgData.put((v / 255.0f - means[c]) / stds[c])
                     }
                 }
             }
             imgData.rewind()
+            
+            // det outputs in PaddleOCR DB are often the same size as input tensor.
+            return PreprocessedData(
+                buffer = imgData,
+                width = detWidth,
+                height = detHeight,
+                scaleX = bitmap.width.toFloat() / detWidth,
+                scaleY = bitmap.height.toFloat() / detHeight
+            )
+        } finally {
+            if (scaledBitmap !== bitmap) scaledBitmap.recycle()
+        }
+    }
 
+    private fun detect(data: PreprocessedData, settings: AppSettings.SettingsData): List<Rect> {
+        val env = ortEnv ?: return emptyList()
+        val det = detSession ?: return emptyList()
+
+        val boxes = mutableListOf<Rect>()
+        try {
             val inputName = det.inputNames.iterator().next()
-            OnnxTensor.createTensor(env, imgData, longArrayOf(1, 3, detHeight.toLong(), detWidth.toLong())).use { inputTensor ->
+            OnnxTensor.createTensor(env, data.buffer, longArrayOf(1, 3, data.height.toLong(), data.width.toLong())).use { inputTensor ->
                 det.run(Collections.singletonMap(inputName, inputTensor)).use { results ->
                     val outputTensor = results[0] as OnnxTensor
                     val shape = outputTensor.info.shape
@@ -218,55 +202,65 @@ object OcrEngine {
                     val probMap = FloatArray(outH * outW)
                     outputTensor.floatBuffer.get(probMap)
 
-                    val scaleX = bitmap.width.toFloat() / outW
-                    val scaleY = bitmap.height.toFloat() / outH
-                    Log.d(TAG, "detect: output shape=${outW}x${outH}, scale=${scaleX}x${scaleY}")
-                    val boxes = extractBoxes(probMap, outH, outW, scaleX, scaleY, settings)
+                    val visited = BitSet(outH * outW)
+                    val scaleX = data.scaleX * (data.width.toFloat() / outW)
+                    val scaleY = data.scaleY * (data.height.toFloat() / outH)
 
-                    for (box in boxes) {
-                        val isVert = when (settings.textOrientation) {
-                            AppSettings.TEXT_ORIENTATION_VERTICAL -> true
-                            AppSettings.TEXT_ORIENTATION_HORIZONTAL -> false
-                            else -> box.height() > box.width() * 1.5
-                        }
-                        val cropped = cropAndRescale(bitmap, box)
-                        val colors = extractColors(cropped)
-                        val finalInput = if (isVert) {
-                            val rotated = rotateBitmap(cropped)
-                            if (rotated !== cropped && cropped !== bitmap) cropped.recycle()
-                            rotated
-                        } else {
-                            cropped
-                        }
+                    for (i in 0 until outH) {
+                        for (j in 0 until outW) {
+                            val idx = i * outW + j
+                            if (probMap[idx] > settings.pixelThresh && !visited.get(idx)) {
+                                var minI = i; var maxI = i
+                                var minJ = j; var maxJ = j
+                                var sumScore = 0f; var count = 0
+                                val q: Queue<Int> = LinkedList()
+                                q.add(idx)
+                                visited.set(idx)
+                                while (q.isNotEmpty()) {
+                                    val curr = q.remove()
+                                    count++
+                                    val ci = curr / outW; val cj = curr % outW
+                                    sumScore += probMap[curr]
+                                    minI = min(minI, ci); maxI = max(maxI, ci)
+                                    minJ = min(minJ, cj); maxJ = max(maxJ, cj)
+                                    val neighbors = arrayOf(0 to 1, 0 to -1, 1 to 0, -1 to 0)
+                                    for (d in neighbors) {
+                                        val ni = ci + d.first; val nj = cj + d.second
+                                        if (ni in 0 until outH && nj in 0 until outW) {
+                                            val nIdx = ni * outW + nj
+                                            if (probMap[nIdx] > settings.pixelThresh && !visited.get(nIdx)) {
+                                                visited.set(nIdx); q.add(nIdx)
+                                            }
+                                        }
+                                    }
+                                }
+                                val avgScore = sumScore / count
+                                if (avgScore > settings.boxThresh && count > 10) {
+                                    val boxW = (maxJ - minJ).toFloat()
+                                    val boxH = (maxI - minI).toFloat()
+                                    val offset = (boxW * boxH * settings.unclipRatio) / (2 * (boxW + boxH))
+                                    
+                                    val left = ((minJ - offset) * scaleX).toInt()
+                                    val top = ((minI - offset) * scaleY).toInt()
+                                    val right = ((maxJ + offset) * scaleX).toInt()
+                                    val bottom = ((maxI + offset) * scaleY).toInt()
 
-                        val text = recognize(finalInput).trim()
-                        
-                        if (finalInput !== bitmap) finalInput.recycle()
+                                    if (left < 0 || top < 0 || right > (data.width * scaleX) || bottom > (data.height * scaleY)) {
+                                        Log.w(TAG, "extractBoxes: Box out of bounds")
+                                    }
 
-                        if (text.isNotEmpty()) {
-                            rawBlocks.add(
-                                TextBlock(
-                                    text = text, 
-                                    bounds = box, 
-                                    firstLineBounds = box, 
-                                    lastLineBounds = box, 
-                                    isVertical = isVert,
-                                    textColor = colors.first,
-                                    backgroundColor = colors.second,
-                                    colorWeight = text.length
-                                )
-                            )
+                                    boxes.add(Rect(left, top, right, bottom))
+                                }
+                            }
                         }
                     }
                 }
             }
-        } finally {
-            if (scaledBitmap !== bitmap) scaledBitmap.recycle()
+        } catch (e: Exception) {
+            Log.e(TAG, "Detection failed", e)
         }
-        return rawBlocks
+        return boxes
     }
-
-
 
     private fun recognize(bitmap: Bitmap): String {
         val env = ortEnv ?: return ""
@@ -329,69 +323,6 @@ object OcrEngine {
         }
     }
 
-    private fun extractBoxes(probMap: FloatArray, h: Int, w: Int, scaleX: Float, scaleY: Float, settings: AppSettings.SettingsData): List<Rect> {
-        val visited = BitSet(h * w)
-        val boxes = mutableListOf<Rect>()
-        for (i in 0 until h) {
-            for (j in 0 until w) {
-                val idx = i * w + j
-                if (probMap[idx] > settings.pixelThresh && !visited.get(idx)) {
-                    var minI = i; var maxI = i
-                    var minJ = j; var maxJ = j
-                    var sumScore = 0f; var count = 0
-                    val q: Queue<Int> = LinkedList()
-                    q.add(idx)
-                    visited.set(idx)
-                    while (q.isNotEmpty()) {
-                        val curr = q.remove()
-                        count++
-                        val ci = curr / w; val cj = curr % w
-                        sumScore += probMap[curr]
-                        minI = min(minI, ci); maxI = max(maxI, ci)
-                        minJ = min(minJ, cj); maxJ = max(maxJ, cj)
-                        val neighbors = arrayOf(0 to 1, 0 to -1, 1 to 0, -1 to 0)
-                        for (d in neighbors) {
-                            val ni = ci + d.first; val nj = cj + d.second
-                            if (ni in 0 until h && nj in 0 until w) {
-                                val nIdx = ni * w + nj
-                                if (probMap[nIdx] > settings.pixelThresh && !visited.get(nIdx)) {
-                                    visited.set(nIdx); q.add(nIdx)
-                                }
-                            }
-                        }
-                    }
-                    val avgScore = sumScore / count
-                    if (avgScore > settings.boxThresh && count > 10) {
-                        val boxW = (maxJ - minJ).toFloat()
-                        val boxH = (maxI - minI).toFloat()
-                        val offset = (boxW * boxH * settings.unclipRatio) / (2 * (boxW + boxH))
-                        
-                        val left = ((minJ - offset) * scaleX).toInt()
-                        val top = ((minI - offset) * scaleY).toInt()
-                        val right = ((maxJ + offset) * scaleX).toInt()
-                        val bottom = ((maxI + offset) * scaleY).toInt()
-                        
-                        if (left < 0 || top < 0 || right > (w * scaleX) || bottom > (h * scaleY)) {
-                            Log.w(TAG, "extractBoxes: Box potentially out of bounds: ($left, $top, $right, $bottom) for bitmap size ${w * scaleX}x${h * scaleY}")
-                            Log.d(TAG, "extractBoxes: raw minJ=$minJ, minI=$minI, maxJ=$maxJ, maxI=$maxI, offset=$offset")
-                        }
-
-                        boxes.add(Rect(left, top, right, bottom))
-                    }
-                }
-            }
-        }
-        return boxes
-    }
-
-    private fun cropAndRescale(original: Bitmap, rect: Rect): Bitmap {
-        val x = max(0, rect.left); val y = max(0, rect.top)
-        val width = min(rect.width(), original.width - x)
-        val height = min(rect.height(), original.height - y)
-        if (width <= 0 || height <= 0) return createBitmap(1, 1)
-        return Bitmap.createBitmap(original, x, y, width, height)
-    }
-
     private fun extractColors(bitmap: Bitmap): Pair<Int, Int> {
         val width = bitmap.width
         val height = bitmap.height
@@ -400,7 +331,7 @@ object OcrEngine {
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
-        // Helper to quantize color to group similar shades (bits reduction)
+        // Quantize color to group similar shades (bits reduction)
         fun quantize(color: Int): Int {
             val r = Color.red(color) and 0xF0
             val g = Color.green(color) and 0xF0
@@ -408,17 +339,17 @@ object OcrEngine {
             return Color.rgb(r, g, b)
         }
 
-        // 1. Estimate background color from the edges
+        // Estimate background color from the edges
         val edgeColors = mutableListOf<Int>()
         for (i in 0 until width) {
-            edgeColors.add(pixels[i]) // Top
+            edgeColors.add(pixels[i])                        // Top
             edgeColors.add(pixels[(height - 1) * width + i]) // Bottom
         }
         for (i in 0 until height) {
-            edgeColors.add(pixels[i * width]) // Left
-            edgeColors.add(pixels[i * width + width - 1]) // Right
+            edgeColors.add(pixels[i * width])                // Left
+            edgeColors.add(pixels[i * width + width - 1])    // Right
         }
-        
+
         // Use quantized mode for background to handle noise/gradients
         val quantizedBg = edgeColors.groupBy { quantize(it) }.maxByOrNull { it.value.size }?.key ?: Color.BLACK
         val bgColor = edgeColors.filter { quantize(it) == quantizedBg }
@@ -426,7 +357,7 @@ object OcrEngine {
         
         Log.d(TAG, "extractColors: BG Detected: ${Integer.toHexString(bgColor)} (Quantized: ${Integer.toHexString(quantizedBg)})")
 
-        // 2. Estimate text color: look for the most prominent color different from background
+        // Estimate text color: look for the most prominent color different from background
         val bgR = Color.red(bgColor); val bgG = Color.green(bgColor); val bgB = Color.blue(bgColor)
         val foregroundPixels = mutableListOf<Int>()
         
@@ -445,18 +376,14 @@ object OcrEngine {
             val buckets = foregroundPixels.groupBy { quantize(it) }
             // Get top 3 most frequent color buckets to avoid being skewed by outliers
             val topBuckets = buckets.entries.sortedByDescending { it.value.size }.take(3)
-            
             // From these frequent buckets, pick the one with maximum contrast to background
             val bestQuantizedFg = topBuckets.maxByOrNull { (qColor, _) ->
                 val r = Color.red(qColor); val g = Color.green(qColor); val b = Color.blue(qColor)
                 abs(r - bgR) + abs(g - bgG) + abs(b - bgB)
             }?.key ?: Color.WHITE
 
-            val finalFg = foregroundPixels.filter { quantize(it) == bestQuantizedFg }
+            foregroundPixels.filter { quantize(it) == bestQuantizedFg }
                 .groupBy { it }.maxByOrNull { it.value.size }?.key ?: bestQuantizedFg
-            
-            Log.d(TAG, "extractColors: Text Detected: ${Integer.toHexString(finalFg)} (Best contrast among top buckets)")
-            finalFg
         } else {
             val fallback = if (bgR + bgG + bgB > 382) Color.BLACK else Color.WHITE
             Log.d(TAG, "extractColors: No foreground found, using fallback: ${Integer.toHexString(fallback)}")
@@ -466,23 +393,32 @@ object OcrEngine {
         return Pair(textColor, bgColor)
     }
 
-    private fun getModelPath(context: Context, modelFile: String): String {
-        val file = java.io.File(context.cacheDir, modelFile)
-        if (file.exists()) {
-            return file.absolutePath
+    private fun resolveModelPath(context: Context, type: String, customPath: String, defaultModelName: String): String {
+        if (type == AppSettings.MODEL_TYPE_CUSTOM && customPath.isNotEmpty()) {
+            if (java.io.File(customPath).exists()) return customPath
+            Log.w(TAG, "Custom model not found at $customPath, falling back to $defaultModelName")
         }
-        
-        return try {
-            context.assets.open(modelFile).use { input ->
-                java.io.FileOutputStream(file).use { output ->
-                    input.copyTo(output)
+
+        val file = java.io.File(context.cacheDir, defaultModelName)
+        if (!file.exists()) {
+            try {
+                context.assets.open(defaultModelName).use { input ->
+                    file.outputStream().use { output -> input.copyTo(output) }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to resolve model $defaultModelName: $e")
+                return ""
             }
-            file.absolutePath
-        } catch (e: Exception) {
-            Log.e(TAG, "Model $modelFile not found in assets or cache: $e")
-            ""
         }
+        return file.absolutePath
+    }
+
+    private fun cropAndRescale(original: Bitmap, rect: Rect): Bitmap {
+        val x = max(0, rect.left); val y = max(0, rect.top)
+        val width = min(rect.width(), original.width - x)
+        val height = min(rect.height(), original.height - y)
+        if (width <= 0 || height <= 0) return createBitmap(1, 1)
+        return Bitmap.createBitmap(original, x, y, width, height)
     }
 
     private fun rotateBitmap(bitmap: Bitmap): Bitmap {

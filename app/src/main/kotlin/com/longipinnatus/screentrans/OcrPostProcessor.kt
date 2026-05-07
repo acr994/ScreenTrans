@@ -2,311 +2,297 @@ package com.longipinnatus.screentrans
 
 import android.graphics.Rect
 import android.util.Log
-import com.google.gson.GsonBuilder
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-data class OcrResult(
-    val mergedBlocks: List<TextBlock>,
-    val rawBlocks: List<TextBlock>
-)
-
 object OcrPostProcessor {
     private val TAG = OcrPostProcessor::class.java.simpleName
-    private val gson = GsonBuilder().create()
 
-    // Thresholds for merging
-    private const val SAME_AXIS_OVERLAP_RATIO = 0.6f
-    private const val CROSS_AXIS_GAP_RATIO = 1.2f
-    private const val STACK_OVERLAP_RATIO = 0.5f
-    private const val STACK_MAX_GAP_RATIO = 1.3f
-    private const val HARD_BREAK_RATIO = 3.0f      // If line ends earlier than this * font size, it's a hard break
-    private const val INDENT_RATIO = 2.5f          // Max indentation (relative to font size) to still merge as same block
+    // Thresholds for merging elements
+    private const val ELEMENTS_OVERLAP_RATIO = 0.6f
+    private const val ELEMENTS_GAP_RATIO = 1.2f
+    // Thresholds for merging lines
+    private const val LINES_OVERLAP_RATIO = 0.5f
+    private const val LINES_MAX_GAP_RATIO = 1.3f
+    // Thresholds for adding line break
+    private const val HARD_BREAK_RATIO = 3.0f
+    private const val INDENT_RATIO = 2.5f
 
-    fun processRawBlocks(rawBlocks: List<TextBlock>, settings: AppSettings.SettingsData): OcrResult {
-        val ignoredRaw = mutableListOf<TextBlock>()
-        val filteredRaw = rawBlocks.filter { block ->
-            if (shouldIgnore(block.text, block.bounds.width(), block.bounds.height(), isMerged = false, settings)) {
-                ignoredRaw.add(block)
-                false
-            } else {
-                true
-            }
-        }
+    fun process(elements: List<TextElement>, settings: AppSettings.SettingsData): List<TextBlock> {
+        val copiedElements = elements.map { it.copy() }
+        val (ignoredElements, filteredElements) = copiedElements.partition { shouldIgnore(it, settings) }
 
-        // Deep copy: ensure filteredMerged and filteredRaw do not share any TextBlock instances
-        // Otherwise, if no merge occurs, mergeBlocks might return original instances from filteredRaw
         val merged = if (settings.mergeTextBoxes) {
-            mergeBlocks(filteredRaw).map { it.copy() }
+            mergeToBlocks(mergeToLines(filteredElements))
         } else {
-            filteredRaw.map { it.copy() }
+            filteredElements.map { it.toTextBlock() }
         }
 
-        val ignoredMerged = mutableListOf<TextBlock>()
-        val filteredMerged = mutableListOf<TextBlock>()
-        for (block in merged) {
-            if (shouldIgnore(block.text, block.bounds.width(), block.bounds.height(), isMerged = true, settings)) {
-                ignoredMerged.add(block)
-            } else {
-                filteredMerged.add(block)
+        val (ignoredMerged, filteredMerged) = merged.partition { shouldIgnore(it, settings) }
+
+        val logEntries = buildList {
+            if (ignoredElements.isNotEmpty()) {
+                add(LogEntry("Ignored Elements (${ignoredElements.size})", ignoredElements.toLogJson()))
             }
-        }
+            if (filteredElements.isNotEmpty()) {
+                add(LogEntry("Filtered Elements (${filteredElements.size})", filteredElements.toLogJson()))
+            }
 
-        logResults(ignoredRaw, filteredRaw, ignoredMerged, filteredMerged, settings)
-
-        return OcrResult(filteredMerged, filteredRaw)
-    }
-
-    private fun logResults(
-        ignoredRaw: List<TextBlock>,
-        filteredRaw: List<TextBlock>,
-        ignoredMerged: List<TextBlock>,
-        filteredMerged: List<TextBlock>,
-        settings: AppSettings.SettingsData
-    ) {
-        val logEntries = mutableListOf<LogEntry>()
-        if (ignoredRaw.isNotEmpty()) logEntries.add(LogEntry("Ignored Raw Blocks", gson.toJson(ignoredRaw)))
-        if (filteredRaw.isNotEmpty()) logEntries.add(LogEntry("Raw OCR Blocks", gson.toJson(filteredRaw)))
-        if (settings.mergeTextBoxes) {
-            if (ignoredMerged.isNotEmpty()) logEntries.add(LogEntry("Ignored Merged Blocks", gson.toJson(ignoredMerged)))
-            if (filteredMerged.isNotEmpty()) logEntries.add(LogEntry("Merged OCR Blocks", gson.toJson(filteredMerged)))
-        }
-        if (logEntries.isNotEmpty()) {
-            LogManager.log(LogType.DEBUG, TAG, logEntries)
-        }
-    }
-
-    private fun shouldIgnore(text: String, width: Int, height: Int, isMerged: Boolean, settings: AppSettings.SettingsData): Boolean {
-        Log.d(TAG, "Checking Text: $text, Merged: $isMerged")
-        for (rule in settings.filterRules) {
-            if (!rule.enabled) continue
-            if (isMerged && !rule.applyToMerged) continue
-            if (!isMerged && !rule.applyToRaw) continue
-
-            val sizeMatch = (rule.minWidth !in 1..width) &&
-                          (rule.minHeight !in 1..height)
-            val textMatch = if (rule.regex.isEmpty()) {
-                true 
-            } else {
-                try {
-                    Regex(rule.regex, RegexOption.IGNORE_CASE).containsMatchIn(text)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Invalid regex in rule: ${rule.regex}", e)
-                    false
+            if (settings.mergeTextBoxes) {
+                if (ignoredMerged.isNotEmpty()) {
+                    add(LogEntry("Ignored Blocks (${ignoredMerged.size})", ignoredMerged.toLogJson()))
+                }
+                if (filteredMerged.isNotEmpty()) {
+                    add(LogEntry("Filtered Blocks (${filteredMerged.size})", filteredMerged.toLogJson()))
                 }
             }
-
-            if (sizeMatch && textMatch) return true
         }
-        return false
+
+        if (logEntries.isNotEmpty()) LogManager.log(LogType.DEBUG, TAG, logEntries)
+
+        return filteredMerged
     }
 
-    private fun mergeBlocks(blocks: List<TextBlock>): List<TextBlock> {
-        if (blocks.size < 2) return blocks
-        
-        val sorted = blocks.sortedWith { b1, b2 ->
-            if (b1.isVertical != b2.isVertical) {
-                b1.isVertical.compareTo(b2.isVertical)
-            } else if (b1.isVertical) {
-                if (abs(b1.bounds.right - b2.bounds.right) < (b1.bounds.width() + b2.bounds.width()) / 4) {
-                    b1.bounds.top.compareTo(b2.bounds.top)
+    private fun <T : OcrEntity> shouldIgnore(item: T, settings: AppSettings.SettingsData): Boolean {
+        val text = item.text
+        val width = item.bounds.width()
+        val height = item.bounds.height()
+        val isMerged = item !is TextElement
+        Log.d(TAG, "Checking Text: $text, Size: $width * $height, Merged: $isMerged")
+
+        return settings.filterRules.asSequence()
+            .filter { it.enabled }
+            .filter { if (isMerged) it.applyToMerged else it.applyToRaw }
+            .any { rule ->
+                val sizeMatch = (rule.minWidth == 0 || width < rule.minWidth) &&
+                        (rule.minHeight == 0 || height < rule.minHeight)
+                if (!sizeMatch) return@any false
+                if (rule.regex.isEmpty()) return@any true
+                rule.pattern?.containsMatchIn(text) ?: false
+            }
+    }
+
+    private fun mergeToLines(elements: List<TextElement>): List<TextLine> {
+        if (elements.isEmpty()) return emptyList()
+
+        val sorted = elements.sortedWith { e1, e2 ->
+            if (e1.isVertical != e2.isVertical) {
+                e1.isVertical.compareTo(e2.isVertical)
+            } else if (e1.isVertical) {
+                if (abs(e1.bounds.centerX() - e2.bounds.centerX()) < (e1.bounds.width() + e2.bounds.width()) / 4) {
+                    e1.bounds.top.compareTo(e2.bounds.top)
                 } else {
-                    b2.bounds.right.compareTo(b1.bounds.right)
+                    e2.bounds.right.compareTo(e1.bounds.right)
                 }
             } else {
-                if (abs(b1.bounds.top - b2.bounds.top) < (b1.bounds.height() + b2.bounds.height()) / 4) {
-                    b1.bounds.left.compareTo(b2.bounds.left)
+                if (abs(e1.bounds.centerY() - e2.bounds.centerY()) < (e1.bounds.height() + e2.bounds.height()) / 4) {
+                    e1.bounds.left.compareTo(e2.bounds.left)
                 } else {
-                    b1.bounds.top.compareTo(b2.bounds.top)
+                    e1.bounds.top.compareTo(e2.bounds.top)
                 }
             }
         }
 
-        val result = sorted.toMutableList()
-        var changed: Boolean
-        do {
-            changed = false
-            var i = 0
-            while (i < result.size) {
-                var j = i + 1
-                while (j < result.size) {
-                    val b1 = result[i]
-                    val b2 = result[j]
-                    if (shouldMerge(b1, b2)) {
-                        result[i] = merge(b1, b2)
-                        result.removeAt(j)
-                        changed = true
-                        continue
-                    }
-                    j++
-                }
-                i++
-            }
-        } while (changed)
-        
-        return result
+        return sorted.groupAndMerge(::shouldMergeElements, ::mergeElements)
     }
 
-    private fun shouldMerge(a: TextBlock, b: TextBlock): Boolean {
+    private fun shouldMergeElements(a: TextElement, b: TextElement): Boolean {
         if (a.isVertical != b.isVertical) return false
         val r1 = a.bounds
         val r2 = b.bounds
-        val avgColW = (a.firstLineBounds.width() + b.firstLineBounds.width()) / 2f
-        val avgRowH = (a.firstLineBounds.height() + b.firstLineBounds.height()) / 2f
+        val avgColW = (r1.width() + r2.width()) / 2f
+        val avgRowH = (r1.height() + r2.height()) / 2f
 
         if (a.isVertical) {
-            // Same column (stacked vertically)
             val hOverlap = max(0, min(r1.right, r2.right) - max(r1.left, r2.left))
             val vGap = if (r1.top < r2.top) r2.top - r1.bottom else r1.top - r2.bottom
-            if (hOverlap > avgColW * SAME_AXIS_OVERLAP_RATIO && vGap < avgColW * STACK_MAX_GAP_RATIO) return true
-
-            // Adjacent columns (merging right-to-left)
-            val vOverlap = max(0, min(r1.bottom, r2.bottom) - max(r1.top, r2.top))
-            val hGap = if (r1.left < r2.left) r2.left - r1.right else r1.left - r2.right
-            // For manga, adjacent columns must have significant vertical overlap and small horizontal gap
-            if (vOverlap > min(r1.height(), r2.height()) * STACK_OVERLAP_RATIO && hGap < avgColW * STACK_MAX_GAP_RATIO) return true
+            if (hOverlap > avgColW * ELEMENTS_OVERLAP_RATIO && vGap < avgColW * ELEMENTS_GAP_RATIO) return true
         } else {
-            // Same row (side-by-side)
             val vOverlap = max(0, min(r1.bottom, r2.bottom) - max(r1.top, r2.top))
             val hGap = if (r1.left < r2.left) r2.left - r1.right else r1.left - r2.right
-            if (vOverlap > avgRowH * SAME_AXIS_OVERLAP_RATIO && hGap < avgRowH * CROSS_AXIS_GAP_RATIO) return true
-
-            // Different rows (stacked horizontally)
-            val hOverlap = max(0, min(r1.right, r2.right) - max(r1.left, r2.left))
-            val vGap = if (r1.top < r2.top) r2.top - r1.bottom else r1.top - r2.bottom
-            if (hOverlap > min(r1.width(), r2.width()) * STACK_OVERLAP_RATIO && vGap < avgRowH * STACK_MAX_GAP_RATIO) return true
+            if (vOverlap > avgRowH * ELEMENTS_OVERLAP_RATIO && hGap < avgRowH * ELEMENTS_GAP_RATIO) return true
         }
         return false
     }
 
-    private fun merge(a: TextBlock, b: TextBlock): TextBlock {
-        val newBounds = Rect(a.bounds)
-        newBounds.union(b.bounds)
-        val text: String
-        val firstLineBounds: Rect
-        val lastLineBounds: Rect
+    private fun mergeElements(elements: List<TextElement>): TextLine {
+        if (elements.size == 1) return elements[0].toTextLine()
+        val first = elements[0]
+        val isVertical = first.isVertical
+        val bounds = Rect()
+        elements.forEach { bounds.union(it.bounds) }
+
+        val sortedElements = elements.sortedBy {
+            if (isVertical) it.bounds.top else it.bounds.left
+        }
+
+        val text = sortedElements.joinToString(if (isCJK(sortedElements.first().text)) "" else " ") { it.text }
+        val (textColor, bgColor, colorWeight) = resolveDominantColor(elements.map {
+            ColorInfo(it.textColor, it.backgroundColor, it.colorWeight)
+        })
+
+        return TextLine(
+            sortedElements,
+            text,
+            bounds,
+            isVertical,
+            textColor,
+            bgColor,
+            colorWeight
+        )
+    }
+
+    private fun mergeToBlocks(lines: List<TextLine>): List<TextBlock> {
+        if (lines.isEmpty()) return emptyList()
+        return lines.groupAndMerge(::shouldMergeLines, ::mergeLines)
+    }
+
+    private fun shouldMergeLines(a: TextLine, b: TextLine): Boolean {
+        if (a.isVertical != b.isVertical) return false
+        val r1 = a.bounds
+        val r2 = b.bounds
+        val avgColW = (r1.width() + r2.width()) / 2f
+        val avgRowH = (r1.height() + r2.height()) / 2f
 
         if (a.isVertical) {
-            val (right, left) = if (a.bounds.left > b.bounds.left) a to b else b to a
-            // Use font size from the first/last lines, which are the most reliable proxies for a single column width
-            val avgW = (a.firstLineBounds.width() + b.firstLineBounds.width()) / 2f
-            val hOverlap = max(0, min(a.bounds.right, b.bounds.right) - max(a.bounds.left, b.bounds.left))
-
-            if (hOverlap > avgW * SAME_AXIS_OVERLAP_RATIO) {
-                // Same column (vertical stack)
-                val (upper, lower) = if (a.bounds.top < b.bounds.top) a to b else b to a
-                val sep = if (isCJK(upper.text) && isCJK(lower.text)) "" else " "
-                text = upper.text + sep + lower.text
-                // Preserve the original line height by keeping top-most and bottom-most line bounds
-                firstLineBounds = upper.firstLineBounds
-                lastLineBounds = lower.lastLineBounds
-            } else {
-                // Adjacent columns (Right to Left)
-                val blockBottom = newBounds.bottom
-                // If the previous column's last line is significantly shorter than the block bottom, it's a hard break
-                val isHardBreak = right.lastLineBounds.bottom < blockBottom - avgW * HARD_BREAK_RATIO
-                val isIndent = left.firstLineBounds.top > right.firstLineBounds.top + avgW * INDENT_RATIO
-
-                val sep = if (isHardBreak || isIndent) "\n" else (if (isCJK(right.text) && isCJK(left.text)) "\n" else " ")
-                text = right.text + sep + left.text
-                // When merging columns, the "first line" (column) is the rightmost one
-                // and the "last line" (column) is the leftmost one.
-                firstLineBounds = right.firstLineBounds
-                lastLineBounds = left.lastLineBounds
-            }
+            val vOverlap = max(0, min(r1.bottom, r2.bottom) - max(r1.top, r2.top))
+            val hGap = if (r1.left < r2.left) r2.left - r1.right else r1.left - r2.right
+            if (vOverlap > min(r1.height(), r2.height()) * LINES_OVERLAP_RATIO && hGap < avgColW * LINES_MAX_GAP_RATIO) return true
         } else {
-            val (upper, lower) = if (a.bounds.top < b.bounds.top) a to b else b to a
-            val avgH = (a.firstLineBounds.height() + b.firstLineBounds.height()) / 2f
-            val vOverlap = max(0, min(a.bounds.bottom, b.bounds.bottom) - max(a.bounds.top, b.bounds.top))
+            val hOverlap = max(0, min(r1.right, r2.right) - max(r1.left, r2.left))
+            val vGap = if (r1.top < r2.top) r2.top - r1.bottom else r1.top - r2.bottom
+            if (hOverlap > min(r1.width(), r2.width()) * LINES_OVERLAP_RATIO && vGap < avgRowH * LINES_MAX_GAP_RATIO) return true
+        }
+        return false
+    }
 
-            if (vOverlap > avgH * SAME_AXIS_OVERLAP_RATIO) {
-                // Same row (horizontal merge)
-                val (l, r) = if (a.bounds.left < b.bounds.left) a to b else b to a
-                val sep = if (isCJK(l.text) && isCJK(r.text)) "" else " "
-                text = l.text + sep + r.text
-                firstLineBounds = Rect(l.firstLineBounds).apply { union(r.firstLineBounds) }
-                lastLineBounds = Rect(l.lastLineBounds).apply { union(r.lastLineBounds) }
-            } else {
-                // Different rows (stacked)
-                val blockRight = newBounds.right
-                val isHardBreak = upper.lastLineBounds.right < blockRight - avgH * HARD_BREAK_RATIO
-                val isIndent = lower.firstLineBounds.left > upper.firstLineBounds.left + avgH * INDENT_RATIO
+    private fun mergeLines(lines: List<TextLine>): TextBlock {
+        if (lines.size == 1) return lines[0].toTextBlock()
+        val first = lines[0]
+        val isVertical = first.isVertical
+        val bounds = Rect()
+        lines.forEach { bounds.union(it.bounds) }
 
-                val vGap = lower.bounds.top - upper.bounds.bottom
-                // If the gap is large enough to fit another line, it's an "empty line"
-                val isDoubleBreak = vGap > avgH * 1.5f
+        val sortedLines = lines.sortedBy {
+            if (isVertical) -it.bounds.left else it.bounds.top
+        }
 
-                Log.d(TAG, """
-                    Text1: "${a.text}"\n\n
-                    Text2: "${b.text}"\n\n
-                    isDoubleBreak=$isDoubleBreak, vGap=$vGap, avgH=$avgH, avgH*1.5=${avgH * 1.5f}\n
-                    isHardBreak=$isHardBreak, isIndent=$isIndent\n
-                """.trimIndent())
+        val textBuilder = StringBuilder()
+        for (i in 0 until sortedLines.size - 1) {
+            val current = sortedLines[i]
+            val next = sortedLines[i + 1]
+            textBuilder.append(current.text)
 
-                val sep = when {
-                    isDoubleBreak -> "\n\n"
+            val sep = if (isVertical) {
+                val avgW = (current.bounds.width() + next.bounds.width()) / 2f
+                val isHardBreak = current.bounds.bottom < bounds.bottom - avgW * HARD_BREAK_RATIO
+                val isIndent = next.bounds.top > current.bounds.top + avgW * INDENT_RATIO
+                when {
                     isHardBreak || isIndent -> "\n"
-                    isCJK(upper.text) && isCJK(lower.text) -> ""
+                    isCJK(current.text) && isCJK(next.text) -> ""
                     else -> " "
                 }
-                text = upper.text + sep + lower.text
-                firstLineBounds = upper.firstLineBounds
-                lastLineBounds = lower.lastLineBounds
-            }
-        }
-        
-        // Boyer-Moore Voting algorithm logic for dominant color selection
-        val (finalColor, finalBg, finalWeight) = if (a.textColor == b.textColor) {
-            // Same color: boost the confidence
-            Triple(a.textColor, a.backgroundColor, a.colorWeight + b.colorWeight)
-        } else {
-            // Different colors: they cancel each other out
-            if (a.colorWeight > b.colorWeight) {
-                Triple(a.textColor, a.backgroundColor, a.colorWeight - b.colorWeight)
-            } else if (b.colorWeight > a.colorWeight) {
-                Triple(b.textColor, b.backgroundColor, b.colorWeight - a.colorWeight)
             } else {
-                // Perfect tie: weight becomes 0, next merge will decide the new candidate
-                Triple(a.textColor, a.backgroundColor, 0)
+                val avgH = (current.bounds.height() + next.bounds.height()) / 2f
+                val isHardBreak = current.bounds.right < bounds.right - avgH * HARD_BREAK_RATIO
+                val isIndent = next.bounds.left > current.bounds.left + avgH * INDENT_RATIO
+                when {
+                    isHardBreak || isIndent -> "\n"
+                    isCJK(current.text) && isCJK(next.text) -> ""
+                    else -> " "
+                }
             }
+            textBuilder.append(sep)
         }
-        
-        Log.d(TAG, "merge: '${a.text.take(5)}...' (${Integer.toHexString(a.textColor ?: 0)}, w=${a.colorWeight}) + " +
-                "'${b.text.take(5)}...' (${Integer.toHexString(b.textColor ?: 0)}, w=${b.colorWeight}) -> " +
-                "Result: ${Integer.toHexString(finalColor ?: 0)}, w=$finalWeight")
+        textBuilder.append(sortedLines.last().text)
 
-        val newLineCount = if (a.isVertical) {
-            val hOverlap = max(0, min(a.bounds.right, b.bounds.right) - max(a.bounds.left, b.bounds.left))
-            val avgW = (a.firstLineBounds.width() + b.firstLineBounds.width()) / 2f
-            if (hOverlap > avgW * SAME_AXIS_OVERLAP_RATIO) a.lineCount.coerceAtLeast(b.lineCount) else a.lineCount + b.lineCount
-        } else {
-            val vOverlap = max(0, min(a.bounds.bottom, b.bounds.bottom) - max(a.bounds.top, b.bounds.top))
-            val avgH = (a.firstLineBounds.height() + b.firstLineBounds.height()) / 2f
-            if (vOverlap > avgH * SAME_AXIS_OVERLAP_RATIO) a.lineCount.coerceAtLeast(b.lineCount) else a.lineCount + b.lineCount
-        }
+        val (textColor, bgColor, colorWeight) = resolveDominantColor(lines.map {
+            ColorInfo(it.textColor, it.backgroundColor, it.colorWeight)
+        })
 
         return TextBlock(
-            text, 
-            newBounds, 
-            firstLineBounds, 
-            lastLineBounds, 
-            isVertical = a.isVertical,
-            textColor = finalColor,
-            backgroundColor = finalBg,
-            colorWeight = finalWeight,
-            lineCount = newLineCount
+            sortedLines,
+            textBuilder.toString(),
+            bounds,
+            isVertical,
+            null,
+            textColor,
+            bgColor,
+            colorWeight
         )
+    }
+
+    private fun <T, R> List<T>.groupAndMerge(
+        shouldMerge: (T, T) -> Boolean,
+        merge: (List<T>) -> R
+    ): List<R> {
+        val size = this.size
+        if (size == 0) return emptyList()
+        if (size == 1) return listOf(merge(this))
+
+        val parent = IntArray(size) { it }
+        fun find(i: Int): Int {
+            var curr = i
+            while (parent[curr] != curr) {
+                parent[curr] = parent[parent[curr]]
+                curr = parent[curr]
+            }
+            return curr
+        }
+
+        fun union(i: Int, j: Int) {
+            val rootI = find(i)
+            val rootJ = find(j)
+            if (rootI != rootJ) parent[rootI] = rootJ
+        }
+
+        for (i in 0 until size) {
+            for (j in i + 1 until size) {
+                if (shouldMerge(this[i], this[j])) {
+                    union(i, j)
+                }
+            }
+        }
+
+        return indices.groupBy { find(it) }
+            .map { (_, indices) -> merge(indices.map { this[it] }) }
+    }
+
+
+    private fun resolveDominantColor(items: List<ColorInfo>): ColorInfo {
+        if (items.isEmpty()) return ColorInfo(null, null, 0)
+        return items.reduce { acc, next ->
+            if (acc.textColor == next.textColor) {
+                ColorInfo(acc.textColor, acc.bgColor, acc.weight + next.weight)
+            } else {
+                when {
+                    acc.weight > next.weight -> ColorInfo(acc.textColor, acc.bgColor, acc.weight - next.weight)
+                    next.weight > acc.weight -> ColorInfo(next.textColor, next.bgColor, next.weight - acc.weight)
+                    else -> ColorInfo(acc.textColor, acc.bgColor, 0)
+                }
+            }
+        }
     }
 
     private fun isCJK(text: String): Boolean {
         return text.any { c ->
-            val code = c.code
-            code in 0x4E00..0x9FFF || 
-            code in 0x3040..0x30FF || 
-            code in 0xAC00..0xD7AF || 
-            code in 0x3000..0x303F || 
-            code in 0xFF00..0xFFEF    
+            val block = Character.UnicodeBlock.of(c)
+            val sc = Character.UnicodeScript.of(c.code)
+
+            sc == Character.UnicodeScript.HAN ||
+            sc == Character.UnicodeScript.HIRAGANA ||
+            sc == Character.UnicodeScript.KATAKANA ||
+            sc == Character.UnicodeScript.HANGUL ||
+
+            block == Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION ||
+            block == Character.UnicodeBlock.HALFWIDTH_AND_FULLWIDTH_FORMS
         }
     }
+
+    private data class ColorInfo(
+        val textColor: Int?,
+        val bgColor: Int?,
+        val weight: Int
+    )
 }
