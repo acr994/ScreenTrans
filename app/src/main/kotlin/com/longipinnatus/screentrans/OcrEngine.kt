@@ -22,7 +22,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 object OcrEngine {
-    private val TAG = OcrEngine::class.java.simpleName
+    private const val TAG = "OcrEngine"
     private var ortEnv: OrtEnvironment? = null
     private var detSession: OrtSession? = null
     private var recSession: OrtSession? = null

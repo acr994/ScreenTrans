@@ -50,6 +50,6 @@ class ScreenTransApplication : Application() {
     }
 
     companion object {
-        private val TAG = ScreenTransApplication::class.java.simpleName
+        private const val TAG = "ScreenTransApplication"
     }
 }

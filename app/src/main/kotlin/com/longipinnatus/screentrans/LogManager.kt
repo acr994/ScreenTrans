@@ -34,7 +34,7 @@ data class LogItem(
 )
 
 object LogManager {
-    private val TAG = LogManager::class.java.simpleName
+    private const val TAG = "LogManager"
     private val logs = mutableListOf<LogItem>()
     private var onLogUpdate: (() -> Unit)? = null
     private var logFile: File? = null

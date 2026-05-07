@@ -13,8 +13,8 @@ android {
         applicationId = "com.longipinnatus.screentrans"
         minSdk = 26
         targetSdk = 37
-        versionCode = 26050201
-        versionName = "0.1.1"
+        versionCode = 26050801
+        versionName = "0.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionNameSuffix = "-alpha"

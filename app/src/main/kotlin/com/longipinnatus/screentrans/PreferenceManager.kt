@@ -20,7 +20,7 @@ class PreferenceManager(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private companion object {
-        val TAG: String = PreferenceManager::class.java.simpleName
+        private const val TAG = "PreferenceManager"
         val OCR_ONLY = booleanPreferencesKey("ocr_only")
         val REGION_MODE = booleanPreferencesKey("region_mode")
         val SHOW_BOXES = booleanPreferencesKey("show_boxes")

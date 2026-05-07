@@ -71,7 +71,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
     companion object {
-        private val TAG = FloatingService::class.java.simpleName
+        private const val TAG = "FloatingService"
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
         const val EXTRA_RESULT_CODE = "EXTRA_RESULT_CODE"

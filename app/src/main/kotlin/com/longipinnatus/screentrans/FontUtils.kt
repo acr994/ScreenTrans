@@ -5,7 +5,7 @@ import android.os.Build
 import java.io.File
 
 object FontUtils {
-    private val TAG = FontUtils::class.java.simpleName
+    private const val TAG = "FontUtils"
     data class FontInfo(val name: String, val path: String)
 
     fun getSystemFonts(): List<FontInfo> {

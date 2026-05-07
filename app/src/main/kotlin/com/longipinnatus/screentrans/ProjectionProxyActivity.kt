@@ -90,6 +90,6 @@ class ProjectionProxyActivity : ComponentActivity() {
     }
 
     companion object {
-        private val TAG = ProjectionProxyActivity::class.java.simpleName
+        private const val TAG = "ProjectionProxyActivity"
     }
 }

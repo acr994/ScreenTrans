@@ -75,9 +75,6 @@ data class TextBlock(
     var backgroundColor: Int? = null,
     var colorWeight: Int = 0
 ) : OcrEntity {
-    val firstLineBounds: Rect get() = lines.firstOrNull()?.bounds ?: bounds
-    val lastLineBounds: Rect get() = lines.lastOrNull()?.bounds ?: bounds
-
     fun offset(dx: Int, dy: Int) {
         bounds.offset(dx, dy)
         lines.forEach { it.offset(dx, dy) }

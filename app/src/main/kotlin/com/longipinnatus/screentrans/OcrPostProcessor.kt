@@ -7,7 +7,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 object OcrPostProcessor {
-    private val TAG = OcrPostProcessor::class.java.simpleName
+    private const val TAG = "OcrPostProcessor"
 
     // Thresholds for merging elements
     private const val ELEMENTS_OVERLAP_RATIO = 0.6f

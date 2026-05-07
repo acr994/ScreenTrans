@@ -298,6 +298,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
-        private val TAG = MainActivity::class.java.simpleName
+        private const val TAG = "MainActivity"
     }
 }

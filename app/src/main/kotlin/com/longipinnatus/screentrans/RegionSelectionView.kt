@@ -171,6 +171,6 @@ class RegionSelectionView @JvmOverloads constructor(
     }
 
     companion object {
-        private val TAG = RegionSelectionView::class.java.simpleName
+        private const val TAG = "RegionSelectionView"
     }
 }

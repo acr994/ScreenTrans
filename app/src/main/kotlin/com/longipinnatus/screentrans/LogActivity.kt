@@ -249,7 +249,7 @@ class LogActivity : ComponentActivity() {
                                 val clipboard = context.getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
                                 val clip = ClipData.newPlainText("log_data", text)
                                 clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, resources.getString(R.string.copied_to_clipboard), Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, resources.getString(R.string.copied_to_clipboard, label), Toast.LENGTH_SHORT).show()
                             }
                         )
                     }
@@ -266,6 +266,6 @@ class LogActivity : ComponentActivity() {
     }
 
     companion object {
-        private val TAG = LogActivity::class.java.simpleName
+        private const val TAG = "LogActivity"
     }
 }
