@@ -218,30 +218,29 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
             @Suppress("DEPRECATION")
             windowManager.defaultDisplay.getRealMetrics(metrics)
         }
-        
+
         val width = metrics.widthPixels
         val height = metrics.heightPixels
         val density = metrics.densityDpi
-        
-        if ((imageReader?.width == width) && (imageReader?.height == height) && (virtualDisplay != null)) return
+
+        if (imageReader != null && imageReader?.width == width && imageReader?.height == height && virtualDisplay != null) return
+
+        Log.d(TAG, "updateVirtualDisplay: Re-creating instance ${width}x${height}, density=$density")
 
         try {
-            if (virtualDisplay == null) {
-                if (virtualDisplayCreated) return
-                virtualDisplayCreated = true
-                imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-                virtualDisplay = proj.createVirtualDisplay(
-                    "ScreenCapture", width, height, density,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    imageReader?.surface, null, null,
-                )
-            } else {
-                val oldReader = imageReader
-                imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-                virtualDisplay?.surface = imageReader?.surface
-                virtualDisplay?.resize(width, height, density)
-                oldReader?.close()
-            }
+            // Release old resources to avoid BufferQueue abandoned issues
+            virtualDisplay?.release()
+            virtualDisplay = null
+            imageReader?.close()
+            imageReader = null
+
+            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            virtualDisplay = proj.createVirtualDisplay(
+                "ScreenCapture", width, height, density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader?.surface, null, null,
+            )
+            virtualDisplayCreated = true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update virtual display", e)
         }
