@@ -206,6 +206,52 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
         virtualDisplayCreated = false
     }
 
+    private fun ensureProjectionReady(): Boolean {
+        updateVirtualDisplay()
+        if ((mediaProjection != null) && (imageReader != null)) {
+            return true
+        }
+
+        LogManager.logSimple(LogType.INFO, TAG, "Projection resources not ready. Launching ProjectionProxyActivity.")
+        val intent = Intent(this, ProjectionProxyActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+        }
+
+        // Use PendingIntent to bypass Background Activity Launch (BAL) restrictions on Android 14+
+        // For Target SDK 35+, we must opt in specifically as creator and then as sender
+        val creatorOptions = ActivityOptions.makeCustomAnimation(this, 0, 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            @Suppress("DEPRECATION")
+            creatorOptions.pendingIntentCreatorBackgroundActivityStartMode =
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            creatorOptions.toBundle()
+        )
+
+        val senderOptions = ActivityOptions.makeBasic()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            @Suppress("DEPRECATION")
+            senderOptions.pendingIntentBackgroundActivityStartMode =
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+        }
+
+        try {
+            LogManager.logSimple(LogType.DEBUG, TAG, "Starting ProjectionProxyActivity via PendingIntent (Dual BAL opt-in)")
+            pendingIntent.send(this, 0, null, null, null, null, senderOptions.toBundle())
+        } catch (e: Exception) {
+            LogManager.logException(TAG, "Failed to launch via PendingIntent, falling back to startActivity", e)
+            startActivity(intent)
+        }
+
+        return false
+    }
+
     private fun updateVirtualDisplay() {
         val proj = mediaProjection ?: return
         val metrics = DisplayMetrics()
@@ -291,14 +337,18 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
                             windowManager.updateViewLayout(this@apply, params)
                         },
                         onClick = {
-                            if (currentSettings.regionMode) {
-                                launchRegionSelection(false)
-                            } else if (!isProcessing.get()) {
-                                captureAndTranslate()
+                            if (ensureProjectionReady()) {
+                                if (currentSettings.regionMode) {
+                                    launchRegionSelection(false)
+                                } else if (!isProcessing.get()) {
+                                    captureAndTranslate()
+                                }
                             }
                         },
                         onDoubleClick = {
-                            launchRegionSelection(true)
+                            if (ensureProjectionReady()) {
+                                launchRegionSelection(true)
+                            }
                         }
                     )
                 }
@@ -361,48 +411,10 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
                 }
                 
                 if ((imageReader == null) || (mediaProjection == null)) {
-                    val msg = "MediaProjection or ImageReader is null (reader=${imageReader!=null}, proj=${mediaProjection!=null}). Launching ProjectionProxyActivity."
-                    LogManager.logSimple(LogType.INFO, TAG, msg)
+                    val msg = "MediaProjection or ImageReader is null (reader=${imageReader!=null}, proj=${mediaProjection!=null})"
+                    LogManager.logSimple(LogType.WARNING, TAG, msg)
                     withContext(Dispatchers.Main) {
                         setBallVisibility(true)
-                        val intent = Intent(this@FloatingService, ProjectionProxyActivity::class.java).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
-                        }
-                        
-                        // Use PendingIntent to bypass Background Activity Launch (BAL) restrictions on Android 14+
-                        // For Target SDK 35+, we must opt in specifically as creator and then as sender
-                        
-                        // 1. Options for Creator: ONLY set CreatorBackgroundActivityStartMode
-                        val creatorOptions = ActivityOptions.makeCustomAnimation(this@FloatingService, 0, 0)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                            @Suppress("DEPRECATION")
-                            creatorOptions.pendingIntentCreatorBackgroundActivityStartMode =
-                                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
-                        }
-
-                        val pendingIntent = PendingIntent.getActivity(
-                            this@FloatingService,
-                            0,
-                            intent,
-                            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                            creatorOptions.toBundle()
-                        )
-                        
-                        // 2. Options for Sender: ONLY set BackgroundActivityStartMode
-                        val senderOptions = ActivityOptions.makeBasic()
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                            @Suppress("DEPRECATION")
-                            senderOptions.pendingIntentBackgroundActivityStartMode =
-                                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
-                        }
-
-                        try {
-                            LogManager.logSimple(LogType.DEBUG, TAG, "Starting ProjectionProxyActivity via PendingIntent (Dual BAL opt-in)")
-                            pendingIntent.send(this@FloatingService, 0, null, null, null, null, senderOptions.toBundle())
-                        } catch (e: Exception) {
-                            LogManager.logException(TAG, "Failed to launch via PendingIntent, falling back to startActivity", e)
-                            startActivity(intent)
-                        }
                     }
                     isProcessing.set(false)
                     return@launch
