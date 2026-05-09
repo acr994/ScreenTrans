@@ -50,15 +50,21 @@ For most Android devices, downloading `app-arm64-v8a-release.apk` is sufficient.
 
 ## How to Use
 
-The DeepSeek API parameters are already set by default. You just need to enter your API Key in the settings to start translating.
+The DeepSeek API parameters are preset by default; you only need to enter your API Key in the settings to start translating.
 
-Region selection mode (default):
+The program runs in region selection mode by default, controlled via a floating button:
 
-* Click the floating button to select an area for translation;
+* Region Selection (default):
+  * Single-click the floating button: Activates free box selection. Drag on the screen to draw any rectangular area; release to instantly recognize and translate.
+  * Double-click the floating button: Activates vertical range selection. The selection automatically spans the full width; simply swipe up or down to adjust the vertical range. Ideal for reading long paragraphs or conversations.
+  * Cancel selection: If the drawn area is very small after releasing, the recognition and translation will be canceled.
 
-* Double-click to enable a more convenient vertical range selection.
+* Full-Screen Translation Mode (switchable in settings):
+  * Single-click the floating button: Recognizes and translates the entire current screen. (If you find that many text blocks are incorrectly merged, you can turn off the "Settings -> OCR -> Merge Text Boxes" option.)
 
-Full-screen translation mode: Click to recognize and translate the entire screen (I rarely use this feature, so the results may not be optimal).
+Once triggered, the OCR recognition results are displayed first. When the translated text is obtained, the translation results will appear as an overlay, covering the original text. Tap the screen to close the overlay.
+
+If the screen is turned off or rotated, the MediaProjection permission need to be re-requested. If the permission is invalid when clicking or double-clicking the floating button, a permission request will pop up in the current screen.
 
 
 ## Screenshots
