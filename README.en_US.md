@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README.en_US.md)
 
-[![Android Build](https://github.com/longipinnatus/screentrans/actions/workflows/android-build.yml/badge.svg)](https://github.com/longipinnatus/screentrans/actions/workflows/android-build.yml)
+[![Android Build](https://github.com/longipinnatus/screentrans/actions/workflows/android-build.yml/badge.svg)](https://github.com/longipinnatus/screentrans/actions/workflows/android-build.yml) ![GitHub all releases](https://img.shields.io/github/downloads/longipinnatus/ScreenTrans/total)
 
 An open-source Android OCR Screen Translator with customizable LLM API integration.
 

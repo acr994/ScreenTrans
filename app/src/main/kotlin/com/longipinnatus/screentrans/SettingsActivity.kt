@@ -361,7 +361,8 @@ class SettingsActivity : AppCompatActivity() {
                         value = manualLanguage,
                         onValueChange = { manualLanguage = it },
                         label = { Text(stringResource(R.string.lang_manual)) },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
                     )
                     
                     HorizontalDivider()
@@ -435,7 +436,8 @@ class SettingsActivity : AppCompatActivity() {
                         value = manualModel,
                         onValueChange = { manualModel = it },
                         label = { Text(stringResource(R.string.model_manual)) },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
                     )
                     
                     HorizontalDivider()
@@ -565,10 +567,22 @@ class SettingsActivity : AppCompatActivity() {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(stringResource(R.string.filter_dialog_desc), style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextField(value = minWidth, onValueChange = { minWidth = it }, label = { Text(stringResource(R.string.width_lt)) }, modifier = Modifier.weight(1f))
-                        TextField(value = minHeight, onValueChange = { minHeight = it }, label = { Text(stringResource(R.string.height_lt)) }, modifier = Modifier.weight(1f))
+                        TextField(
+                            value = minWidth,
+                            onValueChange = { if (it.all { char -> char.isDigit() }) minWidth = it },
+                            label = { Text(stringResource(R.string.width_lt)) },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        TextField(
+                            value = minHeight,
+                            onValueChange = { if (it.all { char -> char.isDigit() }) minHeight = it },
+                            label = { Text(stringResource(R.string.height_lt)) },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
                     }
-                    TextField(value = regex, onValueChange = { regex = it }, label = { Text(stringResource(R.string.regex_pattern)) }, modifier = Modifier.fillMaxWidth())
+                    TextField(value = regex, onValueChange = { regex = it }, label = { Text(stringResource(R.string.regex_pattern)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     Text(stringResource(R.string.apply_to), style = MaterialTheme.typography.labelMedium)
                     RowSwitch(stringResource(R.string.raw_boxes), applyToRaw) { applyToRaw = it }

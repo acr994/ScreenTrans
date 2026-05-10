@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README.en_US.md)
 
-[![Android Build](https://github.com/longipinnatus/screentrans/actions/workflows/android-build.yml/badge.svg)](https://github.com/longipinnatus/screentrans/actions/workflows/android-build.yml)
+[![Android Build](https://github.com/longipinnatus/screentrans/actions/workflows/android-build.yml/badge.svg)](https://github.com/longipinnatus/screentrans/actions/workflows/android-build.yml) ![GitHub all releases](https://img.shields.io/github/downloads/longipinnatus/ScreenTrans/total)
 
 一款支持自定义大模型 API 接口的开源 Android 屏幕 OCR 实时翻译工具。
 
