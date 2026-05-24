@@ -1,6 +1,3 @@
-cd /ruta/a/ScreenTrans
-
-cat > AGENTS.md <<'EOF'
 # AGENTS.md
 
 ## Project
@@ -10,6 +7,16 @@ This repository is an Android screen translation app.
 The app captures the screen with MediaProjection, detects text with OCR, sends text blocks to an LLM translation provider, and renders translated text as an overlay.
 
 The current target is to keep the app stable, modular, private, and compatible with modern Android restrictions.
+
+## Repository map
+
+Before modifying code, read `APP_MAP.md` when present.
+
+Use `APP_MAP.md` as a routing guide to find the relevant files faster, not as a perfect source of truth.
+
+Do not scan the whole repository unless the task requires it.
+
+If a task reveals that `APP_MAP.md` is outdated, update only the relevant section.
 
 ## Core rules
 
@@ -267,4 +274,3 @@ A task is done only when:
 - Build/test/lint status is reported.
 - Manual testing steps are provided.
 - No unrelated files are modified unnecessarily.
-EOF
