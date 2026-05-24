@@ -20,6 +20,7 @@ object TranslationEngine {
     private val JSON = "application/json; charset=utf-8".toMediaType()
     private val gson = Gson()
     private var currentCall: Call? = null
+    private val modelCache = mutableMapOf<String, List<String>>()
     private val THINKING_TAGS_REGEX = Regex("<(think|thought|reasoning)>.*?</\\1>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val MARKDOWN_CODE_BLOCK_REGEX = Regex("^```(?:json)?|```$")
     private val JSON_ITEM_PATTERN = """\{\s*"id"\s*:\s*"?(\d+)"?\s*,\s*"text"\s*:\s*"(.*?)"(?=\s*[},])""".toRegex(RegexOption.DOT_MATCHES_ALL)
@@ -50,6 +51,35 @@ object TranslationEngine {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch models", e)
             emptyList()
+        }
+    }
+
+    data class ModelFetchResult(val models: List<String>, val error: String? = null)
+
+    fun fetchModelsForSettings(settings: AppSettings.SettingsData): ModelFetchResult {
+        val provider = LlmProviderRegistry.getProvider(settings.providerId)
+        val resolvedBaseUrl = LlmProviderRegistry.resolveBaseUrl(settings)
+        val cacheKey = "${provider.id}|$resolvedBaseUrl"
+        val fallback = provider.fallbackModels.ifEmpty { listOf(provider.defaultModel) }
+
+        if (resolvedBaseUrl.isBlank()) {
+            return ModelFetchResult(modelCache[cacheKey] ?: fallback, "Base URL is empty")
+        }
+        if (settings.apiKey.isBlank()) {
+            return ModelFetchResult(modelCache[cacheKey] ?: fallback, "API key is required to fetch models")
+        }
+        if (!provider.supportsModelFetch) {
+            return ModelFetchResult(modelCache[cacheKey] ?: fallback, "Model fetch is not supported by this provider")
+        }
+
+        val fetched = fetchModels(resolvedBaseUrl, settings.apiKey)
+        return if (fetched.isNotEmpty()) {
+            modelCache[cacheKey] = fetched
+            ModelFetchResult(fetched, null)
+        } else {
+            val msg = "Failed to fetch models from provider. Using fallback models."
+            LogManager.logSimple(LogType.WARNING, TAG, "$msg provider=${provider.id}")
+            ModelFetchResult(modelCache[cacheKey] ?: fallback, msg)
         }
     }
 
@@ -114,7 +144,8 @@ object TranslationEngine {
             Log.e(TAG, "Failed to parse custom params", e)
         }
 
-        val url = "${settings.baseUrl.trimEnd('/')}/chat/completions"
+        val baseUrl = LlmProviderRegistry.resolveBaseUrl(settings)
+        val url = "$baseUrl/chat/completions"
         val jsonBody = gson.toJson(requestBodyMap)
 
         LogManager.logRequest(

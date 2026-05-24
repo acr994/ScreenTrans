@@ -49,6 +49,7 @@ class PreferenceManager(private val context: Context) {
         val DET_CUSTOM_MODEL_PATH = stringPreferencesKey("det_custom_model_path")
         val REC_CUSTOM_MODEL_PATH = stringPreferencesKey("rec_custom_model_path")
         val TEXT_ORIENTATION = intPreferencesKey("text_orientation")
+        val PROVIDER_ID = stringPreferencesKey("provider_id")
         val BASE_URL = stringPreferencesKey("base_url")
         val API_KEY = stringPreferencesKey("api_key")
         val TARGET_LANGUAGE = stringPreferencesKey("target")
@@ -105,6 +106,9 @@ class PreferenceManager(private val context: Context) {
                 detCustomModelPath = prefs[DET_CUSTOM_MODEL_PATH] ?: AppSettings.DEFAULT_DET_CUSTOM_MODEL_PATH,
                 recCustomModelPath = prefs[REC_CUSTOM_MODEL_PATH] ?: AppSettings.DEFAULT_REC_CUSTOM_MODEL_PATH,
                 textOrientation = prefs[TEXT_ORIENTATION] ?: AppSettings.DEFAULT_TEXT_ORIENTATION,
+                providerId = prefs[PROVIDER_ID] ?: LlmProviderRegistry.inferProviderIdFromLegacyBaseUrl(
+                    prefs[BASE_URL] ?: AppSettings.DEFAULT_BASE_URL
+                ),
                 baseUrl = prefs[BASE_URL] ?: AppSettings.DEFAULT_BASE_URL,
                 apiKey = prefs[API_KEY] ?: AppSettings.DEFAULT_API_KEY,
                 targetLanguage = prefs[TARGET_LANGUAGE] ?: AppSettings.DEFAULT_TARGET_LANGUAGE,
@@ -171,6 +175,7 @@ class PreferenceManager(private val context: Context) {
             prefs[DET_CUSTOM_MODEL_PATH] = data.detCustomModelPath
             prefs[REC_CUSTOM_MODEL_PATH] = data.recCustomModelPath
             prefs[TEXT_ORIENTATION] = data.textOrientation
+            prefs[PROVIDER_ID] = data.providerId
             prefs[BASE_URL] = data.baseUrl
             prefs[API_KEY] = data.apiKey
             prefs[TARGET_LANGUAGE] = data.targetLanguage
