@@ -4,8 +4,8 @@
 ScreenTrans is an Android app that captures the screen (MediaProjection), runs OCR on captured regions/fullscreen, sends text blocks to OpenAI-compatible LLM providers for translation, and draws translated overlays above original content.
 
 ## 2) Main modules/packages
-- `app/src/main/kotlin/com/longipinnatus/screentrans/`: core app logic (capture, OCR, translation, overlay, settings, services).
-- `app/src/main/kotlin/com/longipinnatus/screentrans/ui/theme/`: Compose theme tokens.
+- `app/src/main/kotlin/io/github/acr994/livetranslate/`: core app logic (capture, OCR, translation, overlay, settings, services).
+- `app/src/main/kotlin/io/github/acr994/livetranslate/ui/theme/`: Compose theme tokens.
 - `app/src/main/res/`: Android resources (strings, themes, icons, XML rules).
 - `app/src/main/assets/`: OCR models/dictionaries (`*.onnx`, `dict.txt`).
 

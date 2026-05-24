@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">ScreenTrans</string>
+    <string name="app_name">LiveTranslate</string>
     <string name="app_ver_by">Version %1$s</string>
     <string name="settings">设置</string>
     <string name="app">应用</string>
