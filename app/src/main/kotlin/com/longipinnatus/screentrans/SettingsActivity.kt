@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FontDownload
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -41,6 +43,10 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -184,7 +190,6 @@ class SettingsActivity : AppCompatActivity() {
         val scope = rememberCoroutineScope()
         val showRuleEditor = remember { mutableStateOf(false) }
         val showSystemFontPicker = remember { mutableStateOf(false) }
-        val showModelPicker = remember { mutableStateOf(false) }
         val showLanguagePicker = remember { mutableStateOf(false) }
         var editingRule by remember { mutableStateOf<AppSettings.FilterRule?>(null) }
 
@@ -280,7 +285,6 @@ class SettingsActivity : AppCompatActivity() {
                     3 -> LlmPage(
                         currentSettings = currentSettings,
                         onUpdate = onUpdate,
-                        onShowModelPicker = { showModelPicker.value = true },
                         onShowLanguagePicker = { showLanguagePicker.value = true }
                     )
                 }
@@ -315,19 +319,6 @@ class SettingsActivity : AppCompatActivity() {
                 onSelectFont = { font ->
                     onUpdate(currentSettings.copy(overlayFontName = "System", overlayFontPath = font.path))
                     showSystemFontPicker.value = false
-                }
-            )
-        }
-
-        if (showModelPicker.value) {
-            ModelSelectionDialog(
-                baseUrl = currentSettings.baseUrl,
-                apiKey = currentSettings.apiKey,
-                currentModel = currentSettings.model,
-                onDismiss = { showModelPicker.value = false },
-                onSelect = { 
-                    onUpdate(currentSettings.copy(model = it))
-                    showModelPicker.value = false
                 }
             )
         }
@@ -1209,21 +1200,77 @@ class SettingsActivity : AppCompatActivity() {
     fun LlmPage(
         currentSettings: AppSettings.SettingsData, 
         onUpdate: (AppSettings.SettingsData) -> Unit,
-        onShowModelPicker: () -> Unit,
         onShowLanguagePicker: () -> Unit
     ) {
+        val providers = remember { LlmProviderRegistry.providers }
+        val selectedProvider = remember(currentSettings.providerId) { LlmProviderRegistry.getProvider(currentSettings.providerId) }
+        var providerExpanded by remember { mutableStateOf(false) }
+        var modelExpanded by remember { mutableStateOf(false) }
+        var isLoadingModels by remember { mutableStateOf(false) }
+        var modelError by remember { mutableStateOf<String?>(null) }
+        var availableModels by remember(currentSettings.providerId) { mutableStateOf(selectedProvider.fallbackModels) }
+
+        fun refreshModels() {
+            isLoadingModels = true
+            modelError = null
+            lifecycleScope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    TranslationEngine.fetchModelsForSettings(currentSettings)
+                }
+                availableModels = result.models.ifEmpty { selectedProvider.fallbackModels }
+                modelError = result.error
+                if (currentSettings.model !in availableModels) {
+                    onUpdate(currentSettings.copy(model = selectedProvider.defaultModel))
+                }
+                isLoadingModels = false
+            }
+        }
+
+        LaunchedEffect(currentSettings.providerId, currentSettings.apiKey, currentSettings.baseUrl) {
+            availableModels = selectedProvider.fallbackModels
+            refreshModels()
+        }
+
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(stringResource(R.string.translation_settings), style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(
-                value = currentSettings.baseUrl,
-                onValueChange = { onUpdate(currentSettings.copy(baseUrl = it)) },
-                label = { Text(stringResource(R.string.base_url)) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
+            ExposedDropdownMenuBox(
+                expanded = providerExpanded,
+                onExpandedChange = { providerExpanded = !providerExpanded }
+            ) {
+                OutlinedTextField(
+                    value = selectedProvider.displayName,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Provider") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                ExposedDropdownMenu(expanded = providerExpanded, onDismissRequest = { providerExpanded = false }) {
+                    providers.forEach { provider ->
+                        DropdownMenuItem(
+                            text = { Text(provider.displayName) },
+                            onClick = {
+                                providerExpanded = false
+                                val nextBaseUrl = if (provider.id == LlmProviderRegistry.PROVIDER_CUSTOM) currentSettings.baseUrl else provider.baseUrl.orEmpty()
+                                val nextModel = if (currentSettings.model in provider.fallbackModels) currentSettings.model else provider.defaultModel
+                                onUpdate(currentSettings.copy(providerId = provider.id, baseUrl = nextBaseUrl, model = nextModel))
+                            }
+                        )
+                    }
+                }
+            }
+            if (currentSettings.providerId == LlmProviderRegistry.PROVIDER_CUSTOM) {
+                OutlinedTextField(
+                    value = currentSettings.baseUrl,
+                    onValueChange = { onUpdate(currentSettings.copy(baseUrl = it)) },
+                    label = { Text(stringResource(R.string.base_url)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            }
             OutlinedTextField(
                 value = currentSettings.apiKey,
                 onValueChange = { onUpdate(currentSettings.copy(apiKey = it)) },
@@ -1231,22 +1278,50 @@ class SettingsActivity : AppCompatActivity() {
                 modifier = Modifier.fillMaxWidth(),
             )
             
-            // Model Selector
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.model_name), style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.height(4.dp))
-                OutlinedButton(
-                    onClick = onShowModelPicker,
-                    modifier = Modifier.fillMaxWidth()
+                ExposedDropdownMenuBox(
+                    expanded = modelExpanded,
+                    onExpandedChange = { modelExpanded = !modelExpanded }
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(currentSettings.model, overflow = TextOverflow.Ellipsis, maxLines = 1)
-                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    OutlinedTextField(
+                        value = currentSettings.model,
+                        onValueChange = {
+                            if (currentSettings.providerId == LlmProviderRegistry.PROVIDER_CUSTOM) {
+                                onUpdate(currentSettings.copy(model = it))
+                            }
+                        },
+                        readOnly = currentSettings.providerId != LlmProviderRegistry.PROVIDER_CUSTOM,
+                        label = { Text("Model") },
+                        trailingIcon = {
+                            if (isLoadingModels) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().menuAnchor()
+                    )
+                    ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
+                        availableModels.forEach { model ->
+                            DropdownMenuItem(
+                                text = { Text(model) },
+                                onClick = {
+                                    modelExpanded = false
+                                    onUpdate(currentSettings.copy(model = model))
+                                }
+                            )
+                        }
                     }
+                }
+                if (!modelError.isNullOrBlank()) {
+                    Text(modelError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                OutlinedButton(onClick = { refreshModels() }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Refresh models")
                 }
             }
 

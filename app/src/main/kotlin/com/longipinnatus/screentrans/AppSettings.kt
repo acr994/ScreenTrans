@@ -53,6 +53,7 @@ object AppSettings {
     const val DEFAULT_TEXT_ORIENTATION = TEXT_ORIENTATION_AUTO
 
     const val DEFAULT_BASE_URL = "https://api.deepseek.com"
+    const val DEFAULT_PROVIDER_ID = LlmProviderRegistry.PROVIDER_DEEPSEEK
     const val DEFAULT_API_KEY = ""
     const val DEFAULT_MODEL = "deepseek-v4-flash"
     const val DEFAULT_FORCE_JSON_RESPONSE = true
@@ -148,6 +149,7 @@ object AppSettings {
         val detCustomModelPath: String = DEFAULT_DET_CUSTOM_MODEL_PATH,
         val recCustomModelPath: String = DEFAULT_REC_CUSTOM_MODEL_PATH,
         val textOrientation: Int = DEFAULT_TEXT_ORIENTATION,
+        val providerId: String = DEFAULT_PROVIDER_ID,
         val baseUrl: String = DEFAULT_BASE_URL,
         val apiKey: String = DEFAULT_API_KEY,
         val targetLanguage: String = DEFAULT_TARGET_LANGUAGE,
