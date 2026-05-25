@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.longipinnatus.screentrans"
+    namespace = "io.github.acr994.livetranslate"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.longipinnatus.screentrans"
+        applicationId = "io.github.acr994.livetranslate"
         minSdk = 26
         targetSdk = 37
         versionCode = 26051001
