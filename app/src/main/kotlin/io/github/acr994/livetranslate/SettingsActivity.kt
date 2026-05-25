@@ -45,8 +45,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExposedDropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -1196,6 +1196,7 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun LlmPage(
         currentSettings: AppSettings.SettingsData, 
@@ -1248,7 +1249,7 @@ class SettingsActivity : AppCompatActivity() {
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerExpanded) },
                     modifier = Modifier.fillMaxWidth().menuAnchor()
                 )
-                ExposedDropdownMenu(expanded = providerExpanded, onDismissRequest = { providerExpanded = false }) {
+                DropdownMenu(expanded = providerExpanded, onDismissRequest = { providerExpanded = false }) {
                     providers.forEach { provider ->
                         DropdownMenuItem(
                             text = { Text(provider.displayName) },
@@ -1303,7 +1304,7 @@ class SettingsActivity : AppCompatActivity() {
                         },
                         modifier = Modifier.fillMaxWidth().menuAnchor()
                     )
-                    ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
+                    DropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
                         availableModels.forEach { model ->
                             DropdownMenuItem(
                                 text = { Text(model) },
