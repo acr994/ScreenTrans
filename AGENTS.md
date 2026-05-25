@@ -21,6 +21,7 @@ If a task reveals that `APP_MAP.md` is outdated, update only the relevant sectio
 ## Core rules
 
 - Read this file before making changes.
+- Read `APP_MAP.md` at repository root before editing (update only relevant sections when architecture/routes change).
 - Inspect the existing code before editing.
 - Prefer small, reviewable patches.
 - Do not rewrite unrelated parts of the app.
