@@ -24,6 +24,7 @@ object TranslationEngine {
     private val THINKING_TAGS_REGEX = Regex("<(think|thought|reasoning)>.*?</\\1>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val MARKDOWN_CODE_BLOCK_REGEX = Regex("^```(?:json)?|```$")
     private val JSON_ITEM_PATTERN = """\{\s*"id"\s*:\s*"?(\d+)"?\s*,\s*"text"\s*:\s*"(.*?)"(?=\s*[},])""".toRegex(RegexOption.DOT_MATCHES_ALL)
+    private const val RAW_LOG_LIMIT = 1000
 
     fun cancel() {
         currentCall?.cancel()
@@ -113,9 +114,16 @@ object TranslationEngine {
         }
         val jsonInput = gson.toJson(textsToTranslate)
 
+        val normalizedModel = settings.model.trim()
+        if (normalizedModel.isEmpty()) {
+            blocks.forEach { block -> block.translatedText = "[Model Empty]" }
+            LogManager.logSimple(LogType.ERROR, TAG, "Translation aborted: model is empty after trim")
+            return blocks
+        }
+
         val stream = (settings.enableStreaming) && (onUpdate != null)
         val requestBodyMap = mutableMapOf(
-            "model" to settings.model,
+            "model" to normalizedModel,
             "messages" to listOf(
                 mapOf("role" to "system", "content" to fullSystemPrompt),
                 mapOf("role" to "user", "content" to jsonInput)
@@ -145,8 +153,14 @@ object TranslationEngine {
         }
 
         val baseUrl = LlmProviderRegistry.resolveBaseUrl(settings)
-        val url = "$baseUrl/chat/completions"
+        val url = "${baseUrl.trimEnd('/')}/chat/completions"
         val jsonBody = gson.toJson(requestBodyMap)
+
+        LogManager.logSimple(
+            LogType.INFO,
+            TAG,
+            "Invoking translation API: provider=${settings.providerId}, url=$url, model=$normalizedModel, stream=$stream, forceJson=${settings.forceJsonResponse}, blocks=${blocks.size}"
+        )
 
         LogManager.logRequest(
             TAG,
@@ -166,9 +180,14 @@ object TranslationEngine {
 
         try {
             call.execute().use { response ->
+                LogManager.logSimple(LogType.INFO, TAG, "Translation HTTP status: ${response.code}")
                 if (!response.isSuccessful) {
                     val errorBody = response.body.string()
-                    LogManager.logSimple(LogType.ERROR, TAG, "Response failed: ${response.code}, body: $errorBody")
+                    LogManager.logSimple(
+                        LogType.ERROR,
+                        TAG,
+                        "Response failed: ${response.code}, errorBody=${limit(errorBody)}"
+                    )
                     throw Exception("HTTP ${response.code}")
                 }
                 
@@ -184,6 +203,7 @@ object TranslationEngine {
                 LogManager.logSimple(LogType.DEBUG, TAG, "Translation cancelled")
             } else {
                 LogManager.logSimple(LogType.ERROR, TAG, "Exception (${e.javaClass.simpleName}): ${e.message}")
+                LogManager.logException(TAG, "Translation failed", e)
             }
             
             blocks.forEach { block ->
@@ -203,6 +223,7 @@ object TranslationEngine {
 
     private fun handleNormalResponse(response: Response, blocks: List<TextBlock>) {
         val body = response.body.string()
+        LogManager.logSimple(LogType.DEBUG, TAG, "Raw response(truncated): ${limit(body)}")
         
         LogManager.logResponse(TAG, response.code, response.message, body)
 
@@ -213,6 +234,11 @@ object TranslationEngine {
         val translatedTexts = parseJsonResponse(rawContent)
             ?: throw Exception("Parse Error: Invalid JSON format")
 
+        LogManager.logSimple(
+            LogType.INFO,
+            TAG,
+            "Parsed translation payload: received=${translatedTexts.size}, expected=${blocks.size}"
+        )
         applyTranslations(blocks, translatedTexts)
     }
 
@@ -255,6 +281,7 @@ object TranslationEngine {
             LogManager.logSimple(LogType.ERROR, TAG, "Streaming error: ${e.message}")
             throw e // Re-throw to be caught by the outer translate() catch block
         } finally {
+            LogManager.logSimple(LogType.DEBUG, TAG, "Streaming raw response(truncated): ${limit(fullContent.toString())}")
             LogManager.logResponse(TAG, response.code, response.message, fullContent.toString())
         }
 
@@ -263,6 +290,11 @@ object TranslationEngine {
         // Final fallback parsing
         val finalTexts = parseJsonResponse(fullContent.toString())
         if (finalTexts != null) {
+            LogManager.logSimple(
+                LogType.INFO,
+                TAG,
+                "Parsed streaming payload: received=${finalTexts.size}, expected=${blocks.size}"
+            )
             applyTranslations(blocks, finalTexts)
             var missingLength = 0
             var hasMissed = false
@@ -362,6 +394,11 @@ object TranslationEngine {
                 Log.e(TAG, "All JSON parsing strategies failed for: $cleanContent")
             }
         }
+    }
+
+    private fun limit(text: String?): String {
+        if (text.isNullOrEmpty()) return ""
+        return if (text.length <= RAW_LOG_LIMIT) text else text.take(RAW_LOG_LIMIT) + "...(truncated)"
     }
 
     private fun tryRegexParse(content: String): List<String>? {

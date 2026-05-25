@@ -456,12 +456,23 @@ class FloatingService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedSta
                         }
 
                         if (!currentSettings.ocrOnly) {
+                            LogManager.logSimple(
+                                LogType.INFO,
+                                TAG,
+                                "Starting translation: blocks=${textBlocks.size}, provider=${currentSettings.providerId}"
+                            )
                             // Update progress (handles streaming and non-streaming translation via onUpdate)
                             TranslationEngine.translate(textBlocks, currentSettings) { streamingIncrementalLen ->
                                 serviceScope.launch(Dispatchers.Main) {
                                     OverlayManager.update(textBlocks, currentSettings, streamingIncrementalLen)
                                 }
                             }
+                            val translatedCount = textBlocks.count { !it.translatedText.isNullOrBlank() && it.translatedText != it.text }
+                            LogManager.logSimple(
+                                LogType.INFO,
+                                TAG,
+                                "Translation finished: translatedBlocks=$translatedCount/${textBlocks.size}"
+                            )
                         }
                         
                         // Final update with clipboard and auto-hide trigger
